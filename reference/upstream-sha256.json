@@ -1,0 +1,21 @@
+{
+  "LICENSE": "5509e6c8d1fb08bc3dba1cfaf59bbce0c0398e0a3f142f6d42174be32c21d413",
+  "README.md": "296e4ba84337b380d040eab0fd62d2492e3c0533a404f4db44f7626f56b9b6a1",
+  "requirements.txt": "afde873f90eef8eed55a8dc5f3ed87c34baf61fe229503d835c1ad278be32de0",
+  "workbuddy_bridge/__init__.py": "016d538d1bbb2e3a3b504d3f4ba02d23e79383c0c43eae8d5978953edcca6d38",
+  "workbuddy_bridge/acp.py": "5fd301a5b12ef9e0227b5e0397359884c82222ddf70ec08623ac2d42e346e4e1",
+  "workbuddy_bridge/activity_log.py": "10625d8bc72f052e9f4b84d0a655db8ff26bf0b79d39b828a4581ca35eeb4a39",
+  "workbuddy_bridge/history.py": "0aadf487670d0d47810acefe0dc99418f8dd4f31f644b31f273cd43a073e5711",
+  "workbuddy_bridge/identities.py": "3cb829d7f53b79065fe0bb23b1d35262a614bb1981f411e7519bd06ea0aed7f5",
+  "workbuddy_bridge/multiplexer.py": "4ea5ce217484e6052974bb2de4b10a03c06c7c7ee4d793deca9da9ca598fccf7",
+  "workbuddy_bridge/review_sessions.py": "f74dd2f40817f15cef385ab55bbc4ce4c14ead7c879ce6b0b99bb430fdc6e36e",
+  "workbuddy_bridge/server.py": "1b2cf4a0dc7166ea058a7c3227e716a48c8fba670a173c806937d0d8b6275f4d",
+  "workbuddy_bridge/test_acp.py": "3cec95ba0d4a1c70eb2b9a6571cf392d2f46b8973d56e7e96b0c9bbdc035fd21",
+  "workbuddy_bridge/test_activity_log.py": "4bcd3d30e333a7c326cbe04999c2252957c4c9fe87969de73b29de22277b6467",
+  "workbuddy_bridge/test_config.py": "08978f46e12de4940a36263197d438c6d303d6b748d73d20f7fd25c8d58a90ad",
+  "workbuddy_bridge/test_hello.py": "beebcb5fb3501ef863d719d4c013da689bf9e500abf995db9f5190f5908059ca",
+  "workbuddy_bridge/test_history.py": "3f9e5450e67a244b03e740917d573c774bb8ac7c034e0ec4ecc8cecdad021142",
+  "workbuddy_bridge/test_identities.py": "677d4128152f648fddf79f54e98d20554704cf7aac412c9c24e660c2b8f51a8a",
+  "workbuddy_bridge/test_multiplexer.py": "f3735880069858d545305a74b3362d204f979eed1ae700cb32fb3461e8747822",
+  "workbuddy_bridge/test_review_sessions.py": "34caf18e8900a4e010f815cf7d77e39016d5267dbf8356973deb610a2b4c439b"
+}

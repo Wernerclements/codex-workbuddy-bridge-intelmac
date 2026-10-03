@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.local/
+.DS_Store
+.env
+.env.*
+reference/upstream/work/
+dist/
+build/

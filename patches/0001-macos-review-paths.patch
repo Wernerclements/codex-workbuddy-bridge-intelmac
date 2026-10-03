@@ -1,0 +1,46 @@
+--- a/workbuddy_bridge/review_sessions.py
++++ b/workbuddy_bridge/review_sessions.py
+@@ -3,6 +3,7 @@
+ import hashlib
+ import json
+ import os
++import re
+ import threading
+ import time
+ import uuid
+@@ -221,6 +222,26 @@
+     return normalize_session_id(matches[0][0])
+ 
+ 
++def _transcript_mentions_target(text: str, target: str) -> bool:
++    """Match the same target across macOS aliases without accepting a prefix."""
++    original = Path(target).expanduser().absolute()
++    canonical = original.resolve()
++    candidates = {str(original), str(canonical)}
++    # macOS exposes /var and /tmp through /private. Accept only aliases that
++    # resolve to this exact existing target; never strip arbitrary prefixes.
++    for prefix in ("/private/var/", "/private/tmp/"):
++        if str(canonical).startswith(prefix):
++            alias = str(canonical).removeprefix("/private")
++            if Path(alias).resolve() == canonical:
++                candidates.add(alias)
++    flags = re.IGNORECASE if os.name == "nt" else 0
++    for candidate in candidates:
++        pattern = r"(?<![\w./\\-])" + re.escape(candidate) + r"(?![\w./\\-])"
++        if re.search(pattern, text, flags):
++            return True
++    return False
++
++
+ def prepare_review_resume(
+     session_id: str,
+     identity: str,
+@@ -261,7 +282,7 @@
+             raise ValueError(
+                 f"旧会话 {session_id} 的对话记录无法证明其身份为 {identity}"
+             )
+-        if normalized_target.casefold() not in combined.casefold():
++        if not _transcript_mentions_target(combined, target):
+             raise ValueError(
+                 f"旧会话 {session_id} 的对话记录不包含当前审查目标，拒绝续接"
+             )
