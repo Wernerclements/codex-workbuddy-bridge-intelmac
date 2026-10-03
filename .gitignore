@@ -8,3 +8,4 @@ __pycache__/
 reference/upstream/work/
 dist/
 build/
+*.egg-info/

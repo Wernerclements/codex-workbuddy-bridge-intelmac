@@ -28,7 +28,7 @@ def main() -> int:
                 ["patch", "--batch", "--forward", "-p1", "-i", str(patch)],
                 cwd=working, check=True,
             )
-        for test in (ROOT / "tests").glob("test_*.py"):
+        for test in (ROOT / "tests").glob("test_macos_review_paths.py"):
             shutil.copy2(test, working / "workbuddy_bridge" / test.name)
         result = subprocess.run(
             [sys.executable, "-m", "unittest", "discover", "-s",

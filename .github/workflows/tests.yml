@@ -28,5 +28,9 @@ jobs:
         run: python -m pip install -r requirements-test.lock
       - name: Check dependencies
         run: python -m pip check
+      - name: Install bridge package
+        run: python -m pip install --no-deps --editable .
       - name: Run complete unit suite
         run: python scripts/test_upstream.py
+      - name: Run bridge tests
+        run: python scripts/test_bridge.py
