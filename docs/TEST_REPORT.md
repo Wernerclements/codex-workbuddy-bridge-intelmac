@@ -12,6 +12,8 @@
 | `pip check` | 通过 | 当前环境无依赖版本冲突 |
 | 原版完整单元测试 | 30/31 通过，1 项错误 | 已覆盖上游发现、ACP、权限、会话等模拟逻辑；发现 Mac 路径问题 |
 | Mac 补丁后的全部单元测试 | 34/34 通过 | 31 项上游测试和 3 项新增路径回归全部通过 |
+| GitHub Actions Intel macOS | 34/34 通过，依赖检查通过 | 在 macos-26-intel / Python 3.12 干净环境复现 |
+| GitHub Actions Ubuntu | 34/34 通过，依赖检查通过 | 在 ubuntu-latest / Python 3.12 干净环境复现 |
 | 原版 `test_hello` 真实任务入口 | 失败 | 找不到 Windows PID 文件；未连接、未发送模型任务 |
 | 本机只读通道诊断 | 通过 | 已发现 1 个 sidecar、协议版本 6、2 个会话和桌面 host |
 | 本机认证状态 | HTTP 200，已认证 | 当前桌面 host 的本机认证可用；不等于已执行模型任务 |
@@ -37,3 +39,5 @@
 ## 自动测试
 
 GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、检查依赖、验证上游哈希并执行 34 项测试。云端不安装或登录 WorkBuddy，因此不能替代本机端到端验收。具体运行结果以 GitHub Actions 记录为准。
+
+首轮 [Actions 运行 37148089345](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37148089345) 已完成，总结为 `success`，两项作业均成功。对应代码提交 `b330459d7ba8fd6a777f95077efacf39017cfa57`。Intel 云端同样从源码构建了 `cryptography`，进一步确认正式安装方案需要处理这个依赖。

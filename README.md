@@ -19,6 +19,7 @@
 - 本机 macOS 26.5.1 / x86_64，WorkBuddy 5.6.2 的 Intel 可执行文件存在。
 - 可只读发现运行中的 sidecar，读取协议版本 6、会话信息及本机认证状态。
 - 上游完整单元测试：原样 30/31 通过；路径兼容补丁后，加上 3 项回归测试，34/34 通过。
+- [云端测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37148089345)：Intel macOS 和 Ubuntu 均为 34/34 通过。
 - 原版真实任务测试停在 Windows 实例发现逻辑，尚未向模型发送任务。
 
 这证明移植有明确入口；新任务执行、取消、结果回收及订阅计费仍需下一阶段实测。**34 项单元测试通过，不代表真实桥接已经可用。**

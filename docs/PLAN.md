@@ -69,3 +69,13 @@ flowchart LR
 ## 首版不做
 
 多任务并发、任意旧会话续接、Trae/Qoder 适配和独立桌面窗口。完成 v0.1 后，根据使用效果选择下一项。
+
+## GitHub 待办
+
+统一归入 [v0.1 单任务桥接](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/milestone/1)：
+
+1. [打通 macOS 单任务通道 #1](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/issues/1)
+2. [完成取消、权限和恢复测试 #2](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/issues/2)
+3. [完成 Intel Mac 安装与发布 #3](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/issues/3)
+
+按顺序推进；保持一个版本里程碑和这三项待办，不另设复杂项目面板。
