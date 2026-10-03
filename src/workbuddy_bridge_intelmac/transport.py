@@ -8,6 +8,7 @@ from typing import Callable
 import httpx
 
 from .discovery import HEADERS, WorkBuddyError, check_endpoint
+from . import __version__
 
 
 def sse_messages(response):
@@ -89,7 +90,7 @@ class AcpClient:
         except (httpx.HTTPError, ValueError, KeyError):
             raise WorkBuddyError("无法建立 WorkBuddy ACP 连接") from None
         self.request("initialize", {"protocolVersion": 1,
-            "clientInfo": {"name": "codex-workbuddy-bridge-intelmac", "version": "0.1.0"},
+            "clientInfo": {"name": "codex-workbuddy-bridge-intelmac", "version": __version__},
             "clientCapabilities": {}}, timeout=30)
 
     def new_session(self, cwd: str) -> str:
@@ -193,6 +194,8 @@ class AcpClient:
             with self._http.stream("POST", self.endpoint, headers=self.headers(), json=payload,
                                    timeout=httpx.Timeout(timeout, connect=5)) as response:
                 response.raise_for_status()
+                if method == "session/prompt":
+                    self.on_event({"type": "prompt_accepted"})
                 for event in sse_messages(response):
                     if event.get("id") == request_id and "method" not in event:
                         if event.get("error"):

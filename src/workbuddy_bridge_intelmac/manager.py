@@ -6,6 +6,7 @@ import fcntl
 import json
 import math
 import os
+import re
 from pathlib import Path
 import stat
 import tempfile
@@ -19,6 +20,7 @@ MAX_SCAN_ENTRIES = 3000
 MAX_ARTIFACTS = 100
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_ANSWER_CHARS = 8 * 1024 * 1024
+REQUEST_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/start_task")
 
 
 def _safe_runtime(value):
@@ -165,24 +167,34 @@ class Manager:
         self._save(task)
         self._condition.notify_all()
 
-    def start_task(self, prompt: str, cwd: str):
+    def start_task(self, prompt: str, cwd: str, request_id: str | None = None):
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100000:
             raise ValueError("任务内容不能为空，且不超过 100000 个字符")
+        if request_id is not None and (not isinstance(request_id, str) or
+                                      re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request_id) is None):
+            raise ValueError("request_id 必须是 1 到 128 个 ASCII 字母、数字、点、下划线或短横线，首字符为字母或数字")
         directory = Path(cwd).expanduser().resolve()
-        if not directory.is_dir():
-            raise ValueError("工作目录不存在")
-        baseline, limited = {}, False
+        task_id = str(uuid.uuid5(REQUEST_NAMESPACE, request_id)) if request_id is not None else str(uuid.uuid4())
         with self._condition:
+            existing = self._tasks.get(task_id)
+            if existing is not None:
+                if existing.get("request_id") != request_id or existing.get("prompt") != prompt or existing.get("cwd") != str(directory):
+                    raise ValueError("request_id 已用于不同的任务内容或工作目录")
+                return self._view(existing)
+            if request_id is not None and (self.state_dir / task_id).exists():
+                raise ValueError("该请求已有记录但无法读取；不能重复提交，请检查任务记录")
             if self._shutdown:
                 raise RuntimeError("桥接服务正在退出")
+            if not directory.is_dir():
+                raise ValueError("工作目录不存在")
             now = time.time()
-            task = {"task_id": str(uuid.uuid4()), "prompt": prompt, "cwd": str(directory),
+            task = {"task_id": task_id, "request_id": request_id, "prompt": prompt, "cwd": str(directory),
                     "status": "queued", "created_at": now, "updated_at": now,
                     "cancel_requested": False, "permission_request": None,
-                    "runtime": None, "baseline": baseline, "scan_limited": limited}
-            self._tasks[task["task_id"]] = task
+                    "runtime": None, "baseline": {}, "scan_limited": False}
             self._save(task)
-            self._queue.append(task["task_id"])
+            self._tasks[task_id] = task
+            self._queue.append(task_id)
             self._condition.notify_all()
             return self._view(task)
 
@@ -255,7 +267,9 @@ class Manager:
         with self._condition:
             if task["status"] in TERMINAL:
                 return
-            if event.get("type") == "runtime":
+            if event.get("type") == "prompt_accepted":
+                self._change(task, prompt_accepted=True, started_at=time.time())
+            elif event.get("type") == "runtime":
                 self._change(task, runtime=_safe_runtime(event.get("runtime", {})))
             elif event.get("type") == "session":
                 self._change(task, session_id=event.get("session_id"))

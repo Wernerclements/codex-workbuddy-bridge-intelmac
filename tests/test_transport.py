@@ -82,7 +82,8 @@ class TransportTests(unittest.TestCase):
         result = self.client.request("session/prompt", {"sessionId": "own-session"})
         self.assertEqual(result["stopReason"], "end_turn")
         self.assertEqual("".join(self.client.answer), "第一段第二段")
-        self.assertEqual([event["text"] for event in self.events], ["第一段", "第二段"])
+        self.assertEqual([event["text"] for event in self.events if event["type"] == "answer"], ["第一段", "第二段"])
+        self.assertEqual(self.events[0], {"type": "prompt_accepted"})
 
     def test_get_broadcast_copy_does_not_duplicate_post_answer(self):
         fake = Http([chunk("answer"), {"id": 1, "result": {"stopReason": "end_turn"}}],
@@ -92,7 +93,7 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(fake.consumed.wait(1))
         self.client.request("session/prompt", {"sessionId": "own-session"})
         self.assertEqual("".join(self.client.answer), "answer")
-        self.assertEqual(len(self.events), 1)
+        self.assertEqual(len([event for event in self.events if event["type"] == "answer"]), 1)
 
     def test_get_normal_eof_is_an_uncertain_subscription(self):
         self.client._http = Http()
@@ -141,6 +142,53 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(WorkBuddyError):
             self.client._event(permission())
         self.client._post_message.assert_not_called()
+
+    def test_sparse_write_permission_is_readable_and_still_waits_for_allow_once(self):
+        event = permission(13)
+        event["params"]["toolCall"] = {
+            "rawInput": {"file_path": "/tmp/intelmac-synthetic/output.md", "content": "Test output",
+                         "password": "SYNTHETIC-PRIVATE-VALUE"},
+            "_meta": {"codebuddy.ai/toolName": "Write"}}
+        entered, release = threading.Event(), threading.Event()
+        requests, failures = [], []
+
+        def human(request):
+            requests.append(request)
+            entered.set()
+            release.wait(1)
+            return "once"
+
+        self.client.on_permission = human
+        self.client._post_message = Mock()
+
+        def receive():
+            try:
+                self.client._event(event)
+            except Exception as error:
+                failures.append(error)
+
+        thread = threading.Thread(target=receive)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.client._post_message.assert_not_called()
+            request = requests[0]
+            self.assertEqual(request["title"], "Write")
+            self.assertEqual(request["tool_name"], "Write")
+            self.assertEqual(request["kind"], "edit")
+            self.assertEqual(request["locations"], [{"path": "/tmp/intelmac-synthetic/output.md"}])
+            self.assertEqual(request["input"], {"file_path": "/tmp/intelmac-synthetic/output.md",
+                                                "content": "Test output"})
+            self.assertNotIn("SYNTHETIC-PRIVATE-VALUE", repr(request))
+            self.assertEqual(request["options"][0]["kind"], "allow_once")
+        finally:
+            release.set()
+            thread.join(1)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(failures, [])
+        self.client._post_message.assert_called_once()
+        self.assertEqual(self.client._post_message.call_args.args[0]["result"],
+                         {"outcome": {"outcome": "selected", "optionId": "once"}})
 
     def test_duplicate_permission_id_is_handled_once(self):
         self.client._post_message = Mock()

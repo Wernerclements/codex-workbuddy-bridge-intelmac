@@ -332,3 +332,71 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(record.read_text(), fenced_record)
         self.assertFalse((record.parent / "answer.txt").exists())
         self.assertEqual(manager.get_task(task_id)["status"], "uncertain")
+
+    def test_idempotent_start_retries_do_not_create_another_model_task(self):
+        manager, controller = self.manager()
+        first = manager.start_task("test", str(self.cwd), "request-001")
+        self.assertTrue(controller.entered.wait(1))
+        retry = manager.start_task("test", str(self.cwd), "request-001")
+        self.assertEqual(first["task_id"], retry["task_id"])
+        self.assertEqual(len(controller.instances), 1)
+        controller.release.set()
+        self.assertEqual(manager.wait_task(first["task_id"], 2)["status"], "succeeded")
+        ended = manager.start_task("test", str(self.cwd), "request-001")
+        self.assertEqual(ended["status"], "succeeded")
+        self.assertEqual(len(controller.instances), 1)
+        manager.close()
+        restarted, unused = self.manager()
+        persisted = restarted.start_task("test", str(self.cwd), "request-001")
+        self.assertEqual(persisted["task_id"], first["task_id"])
+        self.assertEqual(persisted["status"], "succeeded")
+        self.assertEqual(unused.instances, [])
+
+    def test_request_id_conflicts_and_strict_identifier_validation(self):
+        manager, controller = self.manager()
+        manager.start_task("test", str(self.cwd), "stable")
+        other = self.root / "other"
+        other.mkdir()
+        for prompt, directory in (("different", self.cwd), ("test", other)):
+            with self.assertRaisesRegex(ValueError, "不同"):
+                manager.start_task(prompt, str(directory), "stable")
+        for request_id in ("", "a" * 129, "中文", "../escape", "a/b", "a\\b", "a\n", " space", "a\x00", 1, True):
+            with self.assertRaisesRegex(ValueError, "ASCII"):
+                manager.start_task("test", str(self.cwd), request_id)
+        controller.release.set()
+
+    def test_restart_request_id_returns_uncertain_record_without_replaying(self):
+        from workbuddy_bridge_intelmac.manager import REQUEST_NAMESPACE
+        request_id = "lost-response-001"
+        task_id = str(uuid.uuid5(REQUEST_NAMESPACE, request_id))
+        directory = self.root / "state" / task_id
+        directory.mkdir(parents=True)
+        (directory / "task.json").write_text(json.dumps({"task_id": task_id, "request_id": request_id,
+                                                         "prompt": "test", "cwd": str(self.cwd.resolve()),
+                                                         "status": "running", "runtime": None}))
+        manager, controller = self.manager()
+        retry = manager.start_task("test", str(self.cwd), request_id)
+        self.assertEqual(retry["task_id"], task_id)
+        self.assertEqual(retry["status"], "uncertain")
+        self.assertEqual(controller.instances, [])
+
+    def test_corrupt_idempotent_record_fails_closed_instead_of_resubmitting(self):
+        from workbuddy_bridge_intelmac.manager import REQUEST_NAMESPACE
+        request_id = "lost-response-002"
+        directory = self.root / "state" / str(uuid.uuid5(REQUEST_NAMESPACE, request_id))
+        directory.mkdir(parents=True)
+        (directory / "task.json").write_text("corrupt")
+        manager, controller = self.manager()
+        with self.assertRaisesRegex(ValueError, "不能重复"):
+            manager.start_task("test", str(self.cwd), request_id)
+        self.assertEqual(controller.instances, [])
+
+    def test_no_request_id_still_creates_distinct_tasks(self):
+        manager, controller = self.manager()
+        first = manager.start_task("test", str(self.cwd))
+        second = manager.start_task("test", str(self.cwd))
+        self.assertNotEqual(first["task_id"], second["task_id"])
+        controller.release.set()
+        manager.wait_task(first["task_id"], 2)
+        manager.wait_task(second["task_id"], 2)
+        self.assertEqual(len(controller.instances), 2)

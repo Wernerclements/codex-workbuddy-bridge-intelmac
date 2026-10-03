@@ -1,7 +1,8 @@
 """Ownership and recovery tests; every WorkBuddy operation is mocked."""
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from workbuddy_bridge_intelmac import adapter
 from workbuddy_bridge_intelmac.discovery import WORKER_PREFIX, WorkBuddyError
@@ -53,7 +54,12 @@ class RecoveryTests(unittest.TestCase):
     def test_worker_replacement_still_listed_is_not_declared_cleaned(self):
         self.runtime.update(pid=456, runtime_id="previous-runtime")
         entry = {"sessionId": self.worker, "pid": 456}
-        with patch.object(adapter, "rpc", side_effect=[[entry], {"ok": True}, [entry]]) as rpc:
+        def control(path, method, params=None):
+            return [entry] if method == "session.list" else {"ok": True}
+
+        with patch.object(adapter, "rpc", side_effect=control) as rpc, \
+                patch.object(adapter.time, "monotonic", side_effect=range(10)), \
+                patch.object(adapter.time, "sleep"):
             result = adapter.recover_runtime(self.runtime)
         self.assertFalse(result["cleaned"])
         self.assertEqual(rpc.call_args_list[1].args[2]["expectedRuntimeId"], "previous-runtime")
@@ -87,6 +93,59 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(WorkBuddyError):
             adapter.WorkBuddyAdapter("another-desktop-session", "/tmp", lambda event: None,
                                      lambda request: "deny")
+
+    def test_run_uses_lite_app_bundle_auto_port_and_explicit_safe_permissions(self):
+        desktop = SimpleNamespace(socket_path=self.path, sidecar_pid=123, version="5.6.2")
+        app = Path("/SyntheticApps/WorkBuddy.app")
+        info = {"executable": app / "Contents/MacOS/Electron",
+                "cli": app / "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+                "cli_entry_present": True}
+        events = []
+        human_permission = Mock(return_value="deny")
+        instance = adapter.WorkBuddyAdapter(self.task, "/tmp", events.append, human_permission)
+        acp = Mock()
+        acp.new_session.return_value = "own-acp-session"
+        acp.prompt.return_value = {"session_id": "own-acp-session", "answer": "done",
+                                   "stop_reason": "end_turn"}
+        calls = []
+
+        def control(path, method, params=None, **kwargs):
+            calls.append((path, method, params, kwargs))
+            if method == "session.create":
+                return {"sessionId": self.worker, "runtimeId": "owned-runtime", "pid": 456,
+                        "acpEndpoint": "http://127.0.0.1:3456/api/v1/acp"}
+            if method == "session.capture":
+                return {"text": "http://127.0.0.1:3456/?password=SYNTHETIC-SECRET"}
+            self.fail(f"Unexpected control method: {method}")
+
+        with patch.object(adapter, "discover", return_value=desktop) as discover, \
+                patch.object(adapter, "app_info", return_value=info), \
+                patch.object(adapter, "rpc", side_effect=control), \
+                patch.object(adapter, "auth_status", return_value={"authenticated": True}), \
+                patch.object(adapter, "AcpClient", return_value=acp) as client:
+            result = instance.run("Perform a synthetic task")
+
+        self.assertEqual(result["stop_reason"], "end_turn")
+        discover.assert_called_once_with(for_write=True)
+        request = calls[0][2]
+        self.assertEqual(calls[0][1], "session.create")
+        self.assertEqual(request["command"], str(app / "Contents/MacOS/Electron"))
+        self.assertEqual(request["args"][0], str(info["cli"]))
+        self.assertEqual(request["port"], 0)
+        self.assertEqual(request["env"]["CODEBUDDY_FORCE_LITE_WB_BUNDLE"], "1")
+        self.assertEqual(request["env"]["ELECTRON_RUN_AS_NODE"], "1")
+        for option in ["--permission-mode", "--permission-mode-before-plan"]:
+            self.assertEqual(request["args"][request["args"].index(option) + 1], "default")
+        self.assertNotIn("fullAccess", request["args"])
+        self.assertNotIn("bypassPermissions", request["args"])
+        self.assertGreaterEqual(calls[0][3]["timeout"], 195)
+        self.assertEqual(client.call_args.args[3], human_permission)
+        acp.connect.assert_called_once()
+        acp.new_session.assert_called_once_with(instance.cwd)
+        acp.request.assert_called_once_with("session/set_config_option", {
+            "sessionId": "own-acp-session", "configId": "mode", "value": "default"})
+        self.assertNotIn("SYNTHETIC-SECRET", repr(events))
+        human_permission.assert_not_called()
 
 
 if __name__ == "__main__":

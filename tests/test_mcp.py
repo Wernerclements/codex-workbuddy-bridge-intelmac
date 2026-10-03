@@ -63,3 +63,17 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         await self.server.call_tool("wait_task", {"task_id": task_id, "timeout_seconds": 2})
         response = structured(await self.server.call_tool("get_result", {"task_id": task_id}))
         self.assertEqual(Path(response["answer_path"]).read_text(), "answer")
+
+    async def test_start_request_id_is_optional_and_retry_is_idempotent(self):
+        tools = await self.server.list_tools()
+        start = next(tool for tool in tools if tool.name == "start_task")
+        self.assertIn("request_id", start.inputSchema["properties"])
+        self.assertNotIn("request_id", start.inputSchema["required"])
+        arguments = {"prompt": "test", "cwd": str(self.cwd), "request_id": "mcp-request-001"}
+        first = structured(await self.server.call_tool("start_task", arguments))
+        await asyncio.to_thread(self.controller.entered.wait, 1)
+        retry = structured(await self.server.call_tool("start_task", arguments))
+        self.assertEqual(first["task_id"], retry["task_id"])
+        self.assertEqual(len(self.controller.instances), 1)
+        self.controller.release.set()
+        await self.server.call_tool("wait_task", {"task_id": first["task_id"], "timeout_seconds": 2})

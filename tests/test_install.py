@@ -62,6 +62,36 @@ class InstallConfigTests(unittest.TestCase):
         with self.assertRaises(install.InstallError):
             install.add_config(changed, Path("/another/bin/python"))
 
+    def test_custom_app_path_is_forwarded_to_mcp_runtime(self):
+        app = Path("/custom/应用 space/WorkBuddy.app")
+        changed = install.add_config(b"# original\n", self.python, app)
+        own = tomllib.loads(changed.decode())["mcp_servers"][install.SERVER]
+        self.assertEqual(own["env"], {"WORKBUDDY_APP": str(app)})
+        self.assertEqual(install.add_config(changed, self.python, app), changed)
+        self.assertEqual(install.remove_config(changed), b"# original\n")
+
+    def test_different_app_path_is_conflict(self):
+        changed = install.add_config(b"", self.python, Path("/custom/WorkBuddy.app"))
+        with self.assertRaises(install.InstallError):
+            install.add_config(changed, self.python, Path("/another/WorkBuddy.app"))
+        with self.assertRaises(install.InstallError):
+            install.add_config(changed, self.python)
+        default = install.add_config(b"", self.python)
+        with self.assertRaises(install.InstallError):
+            install.add_config(default, self.python, Path("/custom/WorkBuddy.app"))
+
+    def test_main_passes_custom_app_path_to_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "config.toml"
+            app = Path(temporary) / "Custom WorkBuddy.app"
+            environment = Path(temporary) / "venv"
+            with patch.object(install, "check_app", return_value="5.6.2") as check, patch.object(install, "find_python", return_value=Path("/python3.12")), patch.object(install, "install_environment"), redirect_stdout(StringIO()):
+                code = install.main(["--config", str(config), "--venv", str(environment), "--app", str(app)])
+            self.assertEqual(code, 0)
+            check.assert_called_once_with(app, False)
+            own = tomllib.loads(config.read_text())["mcp_servers"][install.SERVER]
+            self.assertEqual(own["env"]["WORKBUDDY_APP"], str(app))
+
     def test_unrelated_block_appended_after_install_is_preserved(self):
         original = b'model="example"\n'
         extra = b'\n[mcp_servers.other]\ncommand="original"\n'

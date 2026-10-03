@@ -2,7 +2,7 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。优先复用 WorkBuddy 的登录状态、Agent 和订阅。
 
-**当前阶段：桥接器已实现，正在完成本机端到端验收。** 安装说明见 [INSTALL](docs/INSTALL.md)，真实结果以测试报告为准。
+**开发版 v0.1.0-alpha.1：已完成本机安装与主要端到端验收，订阅用量待用户核对。** 安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
 
@@ -22,7 +22,7 @@
 - [云端测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37148089345)：Intel macOS 和 Ubuntu 均为 34/34 通过。
 - 原版真实任务测试停在 Windows 实例发现逻辑，尚未向模型发送任务。
 
-开发版已通过一次真实运行时文本测试，以及正式 MCP 的文本回收、超时、取消和权限拒绝测试。文件与恢复验收正在完成；订阅计费仍待用户核对。完整测试基线和本机验收分别记录，避免混淆。
+开发版已通过真实 MCP 文本、文件回收、等待超时、执行中取消、权限拒绝、错误凭证、worker 失联和桥接器重启验收。84 项项目测试与 34 项上游回归全部通过。订阅计费仍待用户核对；桌面界面重新加载后的显示也须本机确认。
 
 ## 文档
 
@@ -30,6 +30,17 @@
 - [测试报告](docs/TEST_REPORT.md)：成功、失败及待验证项。
 - [版本兼容](docs/COMPATIBILITY.md)：哪些环境实际测过。
 - [上游来源](reference/README.md)：固定版本、许可证与独立补丁。
+
+## 安装
+
+```sh
+python3 scripts/install.py --dry-run
+python3 scripts/install.py
+```
+
+Intel 原生依赖缺少预编译包时，在已有编译工具的环境中使用 `--allow-source-build`。安装器备份并合并 Codex 配置，详见 [安装说明](docs/INSTALL.md)。首次安装后重新加载 Codex MCP 或重启应用。
+
+MCP 提供 `start_task`、`get_task`、`wait_task`、`cancel_task`、`get_result`、`health` 与 `respond_permission`。结果完整正文落盘，工具返回摘要与文件路径。
 
 ## 重现测试
 
@@ -40,6 +51,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements-test.lock
 .venv/bin/python -m pip check
 .venv/bin/python scripts/test_upstream.py
+.venv/bin/python scripts/test_bridge.py
 ```
 
 运行器核对上游文件哈希，在临时副本中应用补丁，再执行完整测试。详细输出只保存在忽略的 `.local/`。

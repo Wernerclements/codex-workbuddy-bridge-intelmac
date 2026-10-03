@@ -22,9 +22,9 @@ def create_server(manager: Manager | None = None):
     server = FastMCP("WorkBuddy Intel Mac Bridge", lifespan=lifespan, log_level="WARNING")
 
     @server.tool()
-    async def start_task(prompt: str, cwd: str) -> dict:
-        """在已有 WorkBuddy 登录状态下排队一个新任务，cwd 必须是现有目录。"""
-        return await asyncio.to_thread(manager.start_task, prompt, cwd)
+    async def start_task(prompt: str, cwd: str, request_id: str | None = None) -> dict:
+        """排队一个新任务。建议提供 request_id；响应丢失时原样重试该标识，避免重复执行。cwd 必须是现有目录。"""
+        return await asyncio.to_thread(manager.start_task, prompt, cwd, request_id)
 
     @server.tool()
     async def get_task(task_id: str) -> dict:

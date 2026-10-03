@@ -57,8 +57,13 @@ def recover_runtime(runtime: dict) -> dict:
     if not identity:
         return {"cleaned": False, "reason": "Runtime identity unavailable"}
     rpc(path, "session.kill", {"sessionId": worker, "expectedRuntimeId": identity})
-    remaining = rpc(path, "session.list") or []
-    return {"cleaned": not any(item.get("sessionId") == worker for item in remaining)}
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        remaining = rpc(path, "session.list") or []
+        if not any(item.get("sessionId") == worker for item in remaining):
+            return {"cleaned": True}
+        time.sleep(0.1)
+    return {"cleaned": False, "reason": "Worker termination not yet confirmed"}
 
 
 class WorkBuddyAdapter:

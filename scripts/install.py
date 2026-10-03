@@ -21,6 +21,7 @@ import uuid
 
 SERVER = "workbuddy_intelmac"
 MODULE = "workbuddy_bridge_intelmac.server"
+DEFAULT_APP = Path("/Applications/WorkBuddy.app")
 VERIFIED_VERSIONS = {"5.6.2"}
 BEGIN = re.compile(rb"(?m)^# workbuddy-intelmac:begin v1 sep=([012]) sha256=([a-f0-9]{64})\r?\n")
 END = b"# workbuddy-intelmac:end v1"
@@ -98,26 +99,30 @@ def _contains_server(raw: bytes) -> bool:
     return False
 
 
-def add_config(raw: bytes, python: Path) -> bytes:
+def add_config(raw: bytes, python: Path, app: Path = DEFAULT_APP) -> bytes:
+    app = app.expanduser().absolute()
     span = owned_span(raw)
     if span:
         if _contains_server(raw[:span[0]] + raw[span[1]:]):
             raise InstallError("桥接配置块外另有同名服务；未修改配置。")
         existing_body = raw[BEGIN.search(raw).end():raw.find(END)]
         own = tomllib.loads(existing_body.decode())["mcp_servers"][SERVER]
-        if own.get("command") == str(python) and own.get("args") == ["-m", MODULE]:
+        installed_app = own.get("env", {}).get("WORKBUDDY_APP", str(DEFAULT_APP))
+        if own.get("command") == str(python) and own.get("args") == ["-m", MODULE] and installed_app == str(app):
             return raw
-        raise InstallError("已安装的桥接服务使用另一个路径；请先卸载旧配置。")
+        raise InstallError("已安装的桥接服务使用另一个 Python 或 WorkBuddy 路径；请先卸载旧配置。")
     if _contains_server(raw):
         raise InstallError("已有同名 MCP 服务 workbuddy_intelmac；未覆盖。")
     nl = b"\r\n" if b"\r\n" in raw else b"\n"
     count = 0 if not raw or raw.endswith(nl + nl) else 1 if raw.endswith(nl) else 2
+    app_env = "" if app == DEFAULT_APP else f"env = {{ WORKBUDDY_APP = {json.dumps(str(app), ensure_ascii=False)} }}\n"
     body = (
         f"[mcp_servers.{SERVER}]\n"
         f"command = {json.dumps(str(python), ensure_ascii=False)}\n"
         f'args = ["-m", "{MODULE}"]\n'
         "startup_timeout_sec = 20\n"
         "tool_timeout_sec = 70\n"
+        + app_env
     ).encode("utf-8").replace(b"\n", nl)
     marker = f"# workbuddy-intelmac:begin v1 sep={count} sha256={hashlib.sha256(body).hexdigest()}".encode()
     return raw + nl * count + marker + nl + body + END + nl
@@ -269,19 +274,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python", help="已有的 Intel Python 3.12+ 解释器")
     parser.add_argument("--venv", type=Path, default=ROOT / ".venv", help="独立 Python 环境路径")
     parser.add_argument("--config", type=Path, default=default_config(), help="Codex 配置文件路径")
-    parser.add_argument("--app", type=Path, default=Path("/Applications/WorkBuddy.app"))
+    parser.add_argument("--app", type=Path, default=DEFAULT_APP)
     parser.add_argument("--allow-source-build", action="store_true", help="允许安装原生依赖源码，需要现有构建工具")
     parser.add_argument("--allow-unverified-version", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="只检查与预览，不安装、不改配置")
     args = parser.parse_args(argv)
     try:
-        version = check_app(args.app.expanduser().absolute(), args.allow_unverified_version)
+        app = args.app.expanduser().absolute()
+        version = check_app(app, args.allow_unverified_version)
         python = find_python(args.python)
         config = args.config.expanduser().absolute()
         environment = args.venv.expanduser().absolute()
         check_environment_path(environment)
         before = read_config(config)
-        after = add_config(before, environment / "bin/python")
+        after = add_config(before, environment / "bin/python", app)
         print(f"Intel macOS 检查通过；WorkBuddy {version}。")
         print(f"Python：{python}\n环境：{environment}\n配置：{config}")
         if args.dry_run:
