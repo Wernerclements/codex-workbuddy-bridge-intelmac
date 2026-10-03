@@ -38,7 +38,7 @@
 
 ## 自动测试
 
-GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、检查依赖、验证上游哈希并执行 34 项测试。云端不安装或登录 WorkBuddy，因此不能替代本机端到端验收。具体运行结果以 GitHub Actions 记录为准。
+GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、检查依赖、验证上游哈希并执行 34 项上游回归与 84 项项目测试。云端不安装或登录 WorkBuddy，因此不能替代本机端到端验收。具体运行结果以 GitHub Actions 记录为准。
 
 首轮 [Actions 运行 37148089345](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37148089345) 已完成，总结为 `success`，两项作业均成功。对应代码提交 `b330459d7ba8fd6a777f95077efacf39017cfa57`。Intel 云端同样从源码构建了 `cryptography`，进一步确认正式安装方案需要处理这个依赖。
 
@@ -77,3 +77,5 @@ GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、�
 - 原生桌面历史/专家/旧会话继承属于后续能力；本版本没有直接写应用数据库。
 
 启动接口支持可选 `request_id`，相同标识与相同输入返回原任务，重启及记录损坏时不会重复提交模型。新增 6 项回归覆盖重试、冲突、重启和记录损坏。
+
+最新实现提交 `aab3c13f63621036a9165918aa33a197a16b4e6e` 的 [Actions 运行 37151698086](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37151698086) 已成功：Intel macOS 与 Ubuntu 各自执行全部 118 项测试，均通过。云端结果与本机真实验收分开记录。

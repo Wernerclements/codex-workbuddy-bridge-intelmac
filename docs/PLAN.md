@@ -12,7 +12,7 @@ flowchart LR
   S[可选 Skill 使用说明] -.-> A
   B --> C[macOS 实例发现与版本适配]
   C -->|Unix socket / 本机 ACP| D[WorkBuddy 桌面应用]
-  D --> E[现有 Agent 与登录账号]
+  D --> E[应用内置运行时与登录配置]
   B --> F[桥接器自己的任务记录与结果目录]
 ```
 

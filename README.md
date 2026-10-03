@@ -1,6 +1,6 @@
 # Codex WorkBuddy Bridge · intelmac
 
-让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。优先复用 WorkBuddy 的登录状态、Agent 和订阅。
+让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与登录配置；订阅用量由用户核对。
 
 **开发版 v0.1.0-alpha.1：已完成本机安装与主要端到端验收，订阅用量待用户核对。** 安装说明见 [INSTALL](docs/INSTALL.md)。
 
@@ -19,7 +19,7 @@
 - 本机 macOS 26.5.1 / x86_64，WorkBuddy 5.6.2 的 Intel 可执行文件存在。
 - 可只读发现运行中的 sidecar，读取协议版本 6、会话信息及本机认证状态。
 - 上游完整单元测试：原样 30/31 通过；路径兼容补丁后，加上 3 项回归测试，34/34 通过。
-- [云端测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37148089345)：Intel macOS 和 Ubuntu 均为 34/34 通过。
+- [云端测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37151698086)：Intel macOS 和 Ubuntu 均为 118/118 通过（84 项项目测试 + 34 项上游回归）。
 - 原版真实任务测试停在 Windows 实例发现逻辑，尚未向模型发送任务。
 
 开发版已通过真实 MCP 文本、文件回收、等待超时、执行中取消、权限拒绝、错误凭证、worker 失联和桥接器重启验收。84 项项目测试与 34 项上游回归全部通过。订阅计费仍待用户核对；桌面界面重新加载后的显示也须本机确认。
