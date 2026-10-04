@@ -79,3 +79,19 @@ GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、�
 启动接口支持可选 `request_id`，相同标识与相同输入返回原任务，重启及记录损坏时不会重复提交模型。新增 6 项回归覆盖重试、冲突、重启和记录损坏。
 
 最新实现提交 `aab3c13f63621036a9165918aa33a197a16b4e6e` 的 [Actions 运行 37151698086](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37151698086) 已成功：Intel macOS 与 Ubuntu 各自执行全部 118 项测试，均通过。云端结果与本机真实验收分开记录。
+
+## alpha.2 双模型与工具继承复核
+
+2026-10-04 北京时间 16:07:44–16:08:45：通过实际 MCP stdio 分别执行 Deepseek-V4.1-Flash 与 GLM-5.3-Flash 短任务。两者模型选择回显准确；context_window 选项为 300k/600k/1m，切换 1m 后 usage_update.size=1000000。最后一次用量事件分别 used=35612 和 36278，不是百万 token 满载测试。未配置独立模型 API，实际账号模型标签和积分需要用户用量页交叉核对。
+
+两者都实际调用 ToolSearch 和 Skill；find-skills 完成加载。默认会话没有发现目标通达信/同花顺/法律工具；北京时间 16:10:01–16:10:21 显式加载现有 mcp.json 的测试同样未发现目标工具，说明缺少桌面会话连接器投影。没有调用任何交易、外发消息或第三方业务工具。
+
+北京时间 16:20:20–16:20:34 的补充检查再次完成 ToolSearch 与 Skill 调用。工具活动、模型预算和完整回答保存在忽略的 .local/model-tools；不上传真实会话。活动回显不能替代第三方业务调用已经成功的证据。
+
+修复 MCP 初始化抢任务锁后，两个实际 stdio 客户端在默认目录已被原服务持锁时，均成功初始化、发现7工具并 health 正常。Codex界面重新加载后的原生调用仍待确认；跨对话共享任务调度尚未实现。
+
+原计划的整个 WorkBuddy 应用退出未真实验收；#2重新开放，#3继续开放。详细对照见 [验收与差距](AUDIT.md)。
+
+最终本机自动测试 **115/115 项目测试、34/34 上游回归，共149项全部通过**。新增覆盖模型与上下文选择、幂等参数、启动持锁、有效用量预算、工具名/Skill路径证据脱敏。
+
+工具证据格式在补充测试中先返回unknown，随后精确定位本次测试自己的CLI历史，确认原生输出为typed text并修复解析，无新增模型请求。真实解析证明Skill目录为 ~/.workbuddy/skills/find-skills；ToolSearch的1个候选为 mcp__sheetagent__search_data，四个目标均不匹配。历史读取范围仅该测试自身会话，原始正文不上传。

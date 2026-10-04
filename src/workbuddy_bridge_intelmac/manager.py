@@ -36,6 +36,22 @@ def _safe_runtime(value):
     raise ValueError("运行信息必须可序列化")
 
 
+def _model_metadata(value):
+    """Keep only known capability fields; token counts are not credentials."""
+    result = {}
+    for key in ("id", "name", "context_source"):
+        if isinstance(value.get(key), str):
+            result[key] = value[key][:200]
+    for key in ("max_input_tokens", "context_tokens", "context_requested", "auto_compact_window_requested"):
+        if value.get(key) is None or type(value.get(key)) is int and value[key] > 0:
+            result[key] = value.get(key)
+    if type(value.get("selection_confirmed")) is bool:
+        result["selection_confirmed"] = value["selection_confirmed"]
+    if isinstance(value.get("context_choices"), list):
+        result["context_choices"] = [x for x in value["context_choices"][:20] if type(x) is int and x > 0]
+    return result
+
+
 def _atomic_write(path: Path, text: str):
     fd, temporary = tempfile.mkstemp(prefix=".write-", dir=path.parent)
     try:
@@ -167,9 +183,14 @@ class Manager:
         self._save(task)
         self._condition.notify_all()
 
-    def start_task(self, prompt: str, cwd: str, request_id: str | None = None):
+    def start_task(self, prompt: str, cwd: str, request_id: str | None = None,
+                   model: str = "deepseek-v4.1-flash", context_tokens: int | None = None):
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100000:
             raise ValueError("任务内容不能为空，且不超过 100000 个字符")
+        if not isinstance(model, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model) is None:
+            raise ValueError("model 必须为 WorkBuddy 模型 ID")
+        if context_tokens is not None and (type(context_tokens) is not int or not 1 <= context_tokens <= 10000000):
+            raise ValueError("context_tokens 必须是正整数 token 数且不超过 10000000")
         if request_id is not None and (not isinstance(request_id, str) or
                                       re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request_id) is None):
             raise ValueError("request_id 必须是 1 到 128 个 ASCII 字母、数字、点、下划线或短横线，首字符为字母或数字")
@@ -178,7 +199,9 @@ class Manager:
         with self._condition:
             existing = self._tasks.get(task_id)
             if existing is not None:
-                if existing.get("request_id") != request_id or existing.get("prompt") != prompt or existing.get("cwd") != str(directory):
+                if (existing.get("request_id") != request_id or existing.get("prompt") != prompt
+                        or existing.get("cwd") != str(directory) or existing.get("requested_model", "auto") != model
+                        or existing.get("context_requested") != context_tokens):
                     raise ValueError("request_id 已用于不同的任务内容或工作目录")
                 return self._view(existing)
             if request_id is not None and (self.state_dir / task_id).exists():
@@ -189,6 +212,8 @@ class Manager:
                 raise ValueError("工作目录不存在")
             now = time.time()
             task = {"task_id": task_id, "request_id": request_id, "prompt": prompt, "cwd": str(directory),
+                    "requested_model": model,
+                    "context_requested": context_tokens,
                     "status": "queued", "created_at": now, "updated_at": now,
                     "cancel_requested": False, "permission_request": None,
                     "runtime": None, "baseline": {}, "scan_limited": False}
@@ -261,6 +286,12 @@ class Manager:
                                   "artifacts": task.get("artifacts", []),
                                   "scan_limited": task.get("scan_limited", False),
                                   "error": task.get("error"), "stop_reason": task.get("stop_reason"),
+                                  "requested_model": task.get("requested_model", "auto"),
+                                  "context_requested": task.get("context_requested"),
+                                  "model": task.get("model"),
+                                  "usage": task.get("usage"),
+                                  "activities": task.get("activities", []),
+                                  "available_skills": task.get("available_skills", []),
                                   "partial": task.get("partial", False)})
 
     def _event(self, task, event):
@@ -273,6 +304,24 @@ class Manager:
                 self._change(task, runtime=_safe_runtime(event.get("runtime", {})))
             elif event.get("type") == "session":
                 self._change(task, session_id=event.get("session_id"))
+            elif event.get("type") == "model":
+                self._change(task, model=_model_metadata(event.get("model", {})))
+            elif event.get("type") == "usage":
+                used, size = event.get("used"), event.get("context_size")
+                if type(used) is int and used >= 0 and type(size) is int and size > 0:
+                    self._change(task, usage={"used": used, "context_size": size})
+            elif event.get("type") == "available_skills":
+                skills = [{key: str(item.get(key, ""))[:200] for key in ("name", "source")}
+                          for item in event.get("skills", [])[:500] if isinstance(item, dict)]
+                self._change(task, available_skills=skills)
+            elif event.get("type") == "activity":
+                activities = task.setdefault("activities", [])
+                activities.append({key: str(event.get(key, ""))[:300]
+                                   for key in ("kind", "tool_name", "skill_name", "title", "status")})
+                if isinstance(event.get("evidence"), dict):
+                    activities[-1]["evidence"] = _safe_runtime(event["evidence"])
+                self._change(task, activities=activities[-100:],
+                             status="running" if task["status"] == "connecting" else task["status"])
             elif event.get("type") in {"activity", "running"} and task["status"] == "connecting":
                 self._change(task, status="running")
             elif event.get("type") == "answer":
@@ -328,6 +377,8 @@ class Manager:
                         raise RuntimeError("桥接服务正在退出")
                     self._change(task, baseline=baseline, scan_limited=limited)
                 adapter = self.adapter_factory(task_id=task["task_id"], cwd=task["cwd"],
+                                               model=task["requested_model"],
+                                               context_tokens=task["context_requested"],
                                                on_event=lambda event: self._event(task, event),
                                                on_permission=lambda request: self._permission(task, request))
                 with self._condition:

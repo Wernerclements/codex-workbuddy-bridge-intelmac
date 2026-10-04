@@ -373,6 +373,8 @@ class ManagerTests(unittest.TestCase):
         directory.mkdir(parents=True)
         (directory / "task.json").write_text(json.dumps({"task_id": task_id, "request_id": request_id,
                                                          "prompt": "test", "cwd": str(self.cwd.resolve()),
+                                                         "requested_model": "deepseek-v4.1-flash",
+                                                         "context_requested": None,
                                                          "status": "running", "runtime": None}))
         manager, controller = self.manager()
         retry = manager.start_task("test", str(self.cwd), request_id)
@@ -400,3 +402,94 @@ class ManagerTests(unittest.TestCase):
         manager.wait_task(first["task_id"], 2)
         manager.wait_task(second["task_id"], 2)
         self.assertEqual(len(controller.instances), 2)
+
+    def test_requested_model_and_context_reach_adapter_without_default_fallback(self):
+        observed = []
+
+        def behavior(instance, callbacks, prompt):
+            observed.append((callbacks["model"], callbacks["context_tokens"]))
+            return {"answer": "done", "stop_reason": "end_turn"}
+
+        manager, controller = self.manager(Controller(behavior))
+        default = manager.start_task("default", str(self.cwd))
+        self.assertEqual(manager.wait_task(default["task_id"], 2)["status"], "succeeded")
+        chosen = manager.start_task("chosen", str(self.cwd), model="glm-5.3-flash", context_tokens=1000000)
+        self.assertEqual(manager.wait_task(chosen["task_id"], 2)["status"], "succeeded")
+        self.assertEqual(observed, [("deepseek-v4.1-flash", None), ("glm-5.3-flash", 1000000)])
+        view = manager.get_task(chosen["task_id"])
+        self.assertEqual(view["requested_model"], "glm-5.3-flash")
+        self.assertEqual(view["context_requested"], 1000000)
+
+    def test_request_id_conflicts_include_model_and_context_before_and_after_restart(self):
+        manager, controller = self.manager()
+        original = manager.start_task("test", str(self.cwd), "stable-model", "glm-5.3-flash", 1000000)
+        self.assertTrue(controller.entered.wait(1))
+        for model, context in (("deepseek-v4.1-flash", 1000000), ("glm-5.3-flash", 300000),
+                               ("glm-5.3-flash", None)):
+            with self.subTest(model=model, context=context), self.assertRaisesRegex(ValueError, "不同"):
+                manager.start_task("test", str(self.cwd), "stable-model", model, context)
+        controller.release.set()
+        self.assertEqual(manager.wait_task(original["task_id"], 2)["status"], "succeeded")
+        manager.close()
+        restarted, unused = self.manager()
+        retry = restarted.start_task("test", str(self.cwd), "stable-model", "glm-5.3-flash", 1000000)
+        self.assertEqual(retry["task_id"], original["task_id"])
+        for model, context in (("deepseek-v4.1-flash", 1000000), ("glm-5.3-flash", None)):
+            with self.assertRaisesRegex(ValueError, "不同"):
+                restarted.start_task("test", str(self.cwd), "stable-model", model, context)
+        self.assertEqual(unused.instances, [])
+
+    def test_model_capability_metadata_persists_with_token_budgets_and_redacts_credentials(self):
+        metadata = {"id": "glm-5.3-flash", "name": "GLM-5.3-Flash", "selection_confirmed": True,
+                    "max_input_tokens": 1000000, "context_tokens": 1000000,
+                    "context_choices": [], "context_source": "advertised_model_limit",
+                    "context_requested": 1000000, "auto_compact_window_requested": 1000000}
+
+        def behavior(instance, callbacks, prompt):
+            callbacks["on_event"]({"type": "model", "model": {**metadata,
+                                                                 "authorization": "NEVER-PERSIST-MODEL",
+                                                                 "api_token": "NEVER-PERSIST-MODEL"}})
+            return {"answer": "done", "stop_reason": "end_turn"}
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd), model="glm-5.3-flash",
+                                     context_tokens=1000000)["task_id"]
+        self.assertEqual(manager.wait_task(task_id, 2)["status"], "succeeded")
+        result = manager.get_result(task_id)
+        self.assertEqual(result["requested_model"], "glm-5.3-flash")
+        self.assertEqual(result["context_requested"], 1000000)
+        self.assertEqual(result["model"], metadata)
+        record = self.root / "state" / task_id / "task.json"
+        self.assertEqual(json.loads(record.read_text())["model"], metadata)
+        self.assertNotIn("NEVER-PERSIST-MODEL", record.read_text())
+        manager.close()
+        restarted, unused = self.manager()
+        self.assertEqual(restarted.get_result(task_id)["model"], metadata)
+        self.assertEqual(unused.instances, [])
+
+    def test_old_alpha_record_without_model_cannot_retry_as_new_default(self):
+        from workbuddy_bridge_intelmac.manager import REQUEST_NAMESPACE
+        request_id = "old-alpha-default-model"
+        task_id = str(uuid.uuid5(REQUEST_NAMESPACE, request_id))
+        directory = self.root / "state" / task_id
+        directory.mkdir(parents=True)
+        (directory / "task.json").write_text(json.dumps({"task_id": task_id, "request_id": request_id,
+                                                         "prompt": "test", "cwd": str(self.cwd.resolve()),
+                                                         "status": "running", "runtime": None}))
+        manager, controller = self.manager()
+        self.assertEqual(manager.get_task(task_id)["status"], "uncertain")
+        with self.assertRaisesRegex(ValueError, "不同"):
+            manager.start_task("test", str(self.cwd), request_id)
+        self.assertEqual(manager.get_result(task_id)["requested_model"], "auto")
+        self.assertEqual(controller.instances, [])
+
+    def test_invalid_model_and_context_rejected_before_queueing(self):
+        manager, controller = self.manager()
+        for model in ("", "glm flash", "a\n", "--unsafe", 1, True):
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, "model"):
+                manager.start_task("test", str(self.cwd), model=model)
+        for context in (0, -1, 10000001, True, "1000000", 1.5):
+            with self.subTest(context=context), self.assertRaisesRegex(ValueError, "context_tokens"):
+                manager.start_task("test", str(self.cwd), context_tokens=context)
+        self.assertEqual(manager._tasks, {})
+        self.assertEqual(controller.instances, [])
