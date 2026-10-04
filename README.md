@@ -1,8 +1,8 @@
 # Codex WorkBuddy Bridge · intelmac
 
-让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与登录配置；订阅用量由用户核对。
+让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与登录配置；已通过用户账号用量页核对订阅扣减。
 
-**开发版 v0.1.0-alpha.2：已完成本机安装与主要端到端验收，指定模型用量及界面加载仍待核对。** 安装说明见 [INSTALL](docs/INSTALL.md)。
+**开发版 v0.1.0-alpha.2：已完成本机安装与主要端到端验收，指定模型用量已核对，界面重新加载后的调用仍待确认。** 安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
 
@@ -12,14 +12,14 @@
 - Skill：可选的使用说明，帮助 Codex 选择工具、等待和汇总结果。
 - 独立桌面应用：后续可加状态菜单，首版不需要。
 
-后台服务不等于调用另一个 Agent CLI。诊断使用的 shell 命令只是本机检查手段。
+执行通道使用 WorkBuddy 应用内置 CLI Host、sidecar 与 ACP，账号用量页显示 CLI。用户在 Codex.app 中操作；桥接器启动并管理应用自带的执行运行时。
 
 ## 已验证
 
 - 本机 macOS 26.5.1 / x86_64，WorkBuddy 5.6.2 的 Intel 可执行文件存在。
 - 可只读发现运行中的 sidecar，读取协议版本 6、会话信息及本机认证状态。
 - 上游完整单元测试：原样 30/31 通过；路径兼容补丁后，加上 3 项回归测试，34/34 通过。
-- [云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml)：Intel macOS 和 Ubuntu 执行完整项目与上游回归；当前本机 149/149 通过（115 项项目测试 + 34 项上游回归），云端以运行记录为准。
+- [云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml)：Intel macOS 和 Ubuntu 执行完整项目与上游回归；当前本机 152/152 通过（118 项项目测试 + 34 项上游回归），云端以运行记录为准。
 - 原版真实任务测试停在 Windows 实例发现逻辑，尚未向模型发送任务。
 
 开发版已通过真实 MCP 文本、文件回收、等待超时、执行中取消、权限拒绝、错误凭证、worker 失联和桥接器重启验收。本轮新增双模型选择与 1m 上下文预算，实际任务通过；现有用户 Skill 可加载，桌面目标 MCP 仍未继承。详细证据、三项待办的严格状态和上游差距见 [验收与差距](docs/AUDIT.md)。
@@ -28,6 +28,7 @@
 
 - [验收与差距](docs/AUDIT.md)：模型、上下文、工具继承和上游能力对照。
 - [移植计划](docs/PLAN.md)：范围、步骤和验收条件。
+- [桌面连接器适配](docs/CONNECTORS.md)：已验证的协议边界与后续实现顺序。
 - [测试报告](docs/TEST_REPORT.md)：成功、失败及待验证项。
 - [版本兼容](docs/COMPATIBILITY.md)：哪些环境实际测过。
 - [上游来源](reference/README.md)：固定版本、许可证与独立补丁。
