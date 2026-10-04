@@ -23,6 +23,14 @@ MAX_ANSWER_CHARS = 8 * 1024 * 1024
 REQUEST_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/start_task")
 
 
+class RuntimeLostError(RuntimeError):
+    status = "uncertain"
+    public_message = "WorkBuddy 运行实例退出或连接失效，任务结果不确定。"
+
+    def __init__(self):
+        super().__init__(self.public_message)
+
+
 def _safe_runtime(value):
     """适配器不得持久化凭证；额外过滤常见敏感键。"""
     if isinstance(value, dict):
@@ -141,15 +149,27 @@ class Manager:
                 task = json.loads(record.read_text(encoding="utf-8"))
                 if task.get("task_id") != directory.name:
                     continue
-                if task["status"] not in TERMINAL:
+                interrupted = task["status"] not in TERMINAL
+                needs_cleanup = interrupted or bool(task.get("cleanup_pending"))
+                if interrupted:
                     task["status"] = "uncertain"
                     task["error"] = "桥接服务曾中断；任务未重新提交。"
                     task["permission_request"] = None
-                    if task.get("runtime"):
-                        try:
-                            task["recovery"] = _safe_runtime(self._recover(task["runtime"]))
-                        except Exception as error:
-                            task["recovery"] = {"error_type": type(error).__name__}
+                if needs_cleanup and task.get("runtime"):
+                    task["cleanup_pending"] = True
+                    task["cleanup_confirmed"] = False
+                    try:
+                        task["recovery"] = _safe_runtime(self._recover(task["runtime"]))
+                        cleaned = isinstance(task["recovery"], dict) and task["recovery"].get("cleaned") is True
+                        task["cleanup_confirmed"] = cleaned
+                        task["cleanup_pending"] = not cleaned
+                    except Exception as error:
+                        task["recovery"] = {"error_type": type(error).__name__}
+                        task["cleanup_error_type"] = type(error).__name__
+                elif task.get("cleanup_pending"):
+                    task["cleanup_confirmed"] = False
+                    task["recovery"] = {"cleaned": False, "reason": "Runtime metadata unavailable"}
+                if interrupted or needs_cleanup:
                     task["updated_at"] = time.time()
                 self._tasks[directory.name] = task
                 self._save(task)
@@ -265,7 +285,7 @@ class Manager:
         with self._condition:
             task = self._task(task_id)
             request = task.get("permission_request")
-            if task["status"] != "permission_required" or not request or task["cancel_requested"]:
+            if task["status"] != "permission_required" or not request or task["cancel_requested"] or task.get("runtime_lost"):
                 raise ValueError("任务没有待处理的权限请求")
             if request.get("request_id") != request_id:
                 raise ValueError("权限请求已过期或不匹配")
@@ -292,16 +312,26 @@ class Manager:
                                   "usage": task.get("usage"),
                                   "activities": task.get("activities", []),
                                   "available_skills": task.get("available_skills", []),
-                                  "partial": task.get("partial", False)})
+                                  "partial": task.get("partial", False),
+                                  "cleanup_pending": task.get("cleanup_pending", False),
+                                  "cleanup_confirmed": task.get("cleanup_confirmed", False)})
 
     def _event(self, task, event):
         with self._condition:
             if task["status"] in TERMINAL:
                 return
-            if event.get("type") == "prompt_accepted":
+            if event.get("type") == "runtime_lost":
+                # Wake permission callbacks without granting or treating an unexpected
+                # process loss as a user cancellation. _work owns final persistence.
+                self._change(task, runtime_lost=True, permission_request=None,
+                             status="running" if task["status"] == "permission_required" else task["status"])
+            elif event.get("type") == "prompt_accepted":
                 self._change(task, prompt_accepted=True, started_at=time.time())
             elif event.get("type") == "runtime":
-                self._change(task, runtime=_safe_runtime(event.get("runtime", {})))
+                runtime = _safe_runtime(event.get("runtime", {}))
+                self._change(task, runtime=runtime,
+                             cleanup_pending=bool(runtime) or task.get("cleanup_pending", False),
+                             cleanup_confirmed=False)
             elif event.get("type") == "session":
                 self._change(task, session_id=event.get("session_id"))
             elif event.get("type") == "model":
@@ -334,6 +364,8 @@ class Manager:
 
     def _permission(self, task, request):
         with self._condition:
+            if task.get("runtime_lost") or task["status"] in TERMINAL:
+                raise RuntimeLostError()
             if task["cancel_requested"] or self._shutdown:
                 raise RuntimeError("任务已取消")
             request = copy.deepcopy(request)
@@ -341,8 +373,10 @@ class Manager:
             self._change(task, status="permission_required", permission_request=request,
                          permission_choice=None)
             while task.get("permission_choice") is None and not task["cancel_requested"] \
-                    and not self._shutdown:
+                    and not self._shutdown and not task.get("runtime_lost") and task["status"] not in TERMINAL:
                 self._condition.wait()
+            if task.get("runtime_lost") or task["status"] in TERMINAL:
+                raise RuntimeLostError()
             if task["cancel_requested"] or self._shutdown:
                 raise RuntimeError("任务已取消")
             choice = task.pop("permission_choice")
@@ -400,7 +434,11 @@ class Manager:
                     reason = result.get("stop_reason")
                     if task["status"] == "uncertain":
                         continue
-                    if task["cancel_requested"] or reason == "cancelled":
+                    if task["cancel_requested"]:
+                        status_value = "cancelled"
+                    elif task.get("runtime_lost"):
+                        status_value = "uncertain"
+                    elif reason == "cancelled":
                         status_value = "cancelled"
                     elif reason == "refusal":
                         status_value = "failed"
@@ -416,7 +454,8 @@ class Manager:
                                  summary=answer[:2000], answer_path=str(self.state_dir / task["task_id"] / "answer.txt"),
                                  artifacts=artifacts, permission_request=None,
                                  partial=status_value != "succeeded" and bool(answer or artifacts),
-                                 error=("WorkBuddy 拒绝执行此任务，未完成请求。" if reason == "refusal"
+                                 error=(RuntimeLostError.public_message if task.get("runtime_lost") and status_value == "uncertain"
+                                        else "WorkBuddy 拒绝执行此任务，未完成请求。" if reason == "refusal"
                                         else "WorkBuddy 达到生成或请求次数限制，结果可能不完整。" if reason in {"max_tokens", "max_turn_requests"}
                                         else "WorkBuddy 返回空正文，未检测到文件变化。" if status_value == "failed"
                                         else "WorkBuddy 未返回可识别的结束状态。" if status_value == "uncertain" else None),
@@ -438,20 +477,29 @@ class Manager:
                         answer_path = str(path)
                     partial = bool(answer or artifacts)
                     status_value = ("cancelled" if task["cancel_requested"] else
-                                    "uncertain" if partial or getattr(error, "status", None) == "uncertain" else "failed")
+                                    "uncertain" if task.get("runtime_lost") or partial or getattr(error, "status", None) == "uncertain" else "failed")
                     # Exception strings may contain authentication data; expose only safe adapter messages.
                     self._change(task, status=status_value,
-                                 error=getattr(error, "public_message", None) or f"执行未完成（{type(error).__name__}）",
+                                 error=(RuntimeLostError.public_message if task.get("runtime_lost") and status_value == "uncertain"
+                                        else getattr(error, "public_message", None) or f"执行未完成（{type(error).__name__}）"),
                                  permission_request=None, partial=partial, summary=answer[:2000],
                                  answer_path=answer_path, artifacts=artifacts, scan_limited=limited)
             finally:
                 if adapter is not None:
                     try:
-                        adapter.close()
+                        cleanup = adapter.close()
+                        if isinstance(cleanup, dict):
+                            cleaned = cleanup.get("cleaned") is True
+                            with self._condition:
+                                # Resource bookkeeping may finish after the task.
+                                # It must never replace status, answer, or errors.
+                                self._change(task, cleanup_confirmed=cleaned, cleanup_pending=not cleaned)
+                        # Legacy close() -> None gives no verification; preserve
+                        # runtime's pending marker for a later checked recovery.
                     except Exception as error:
                         with self._condition:
-                            if task["status"] != "uncertain":
-                                self._change(task, cleanup_error_type=type(error).__name__)
+                            self._change(task, cleanup_pending=True, cleanup_confirmed=False,
+                                         cleanup_error_type=type(error).__name__)
                 with self._condition:
                     self._adapters.pop(task["task_id"], None)
 

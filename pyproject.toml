@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-workbuddy-bridge-intelmac"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "A local MCP bridge between Codex and WorkBuddy on Intel Mac"
 requires-python = ">=3.12"
 license = "MIT"
@@ -12,3 +12,6 @@ dependencies = ["mcp>=1.30,<2", "httpx>=0.28,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+workbuddy_bridge_intelmac = ["*.cjs"]

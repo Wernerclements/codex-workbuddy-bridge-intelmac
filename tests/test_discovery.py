@@ -130,6 +130,35 @@ class DiscoveryTests(unittest.TestCase):
                 discovery.discover(for_write=True)
             sockets.assert_not_called()
 
+    def test_cold_start_requires_no_existing_control_socket(self):
+        with patch.object(discovery, "app_info", return_value={"version": "5.6.2", "intel_binary": True}), \
+                patch.object(discovery, "find_sockets", return_value=[]), \
+                self.assertRaises(discovery.WorkBuddyError) as caught:
+            discovery.discover(for_write=True)
+        self.assertEqual(caught.exception.kind, "cold_start")
+
+    def test_incompatible_existing_protocol_cannot_trigger_cold_fallback(self):
+        with patch.object(discovery, "app_info", return_value={"version": "5.6.2", "intel_binary": True}), \
+                patch.object(discovery, "find_sockets", return_value=[(self.path, 123)]), \
+                patch.object(discovery, "rpc", return_value={"version": 999}) as rpc, \
+                self.assertRaises(discovery.WorkBuddyError) as caught:
+            discovery.discover(for_write=True)
+        self.assertNotEqual(caught.exception.kind, "cold_start")
+        rpc.assert_called_once_with(self.path, "sidecar.ping")
+
+    def test_existing_host_auth_failure_cannot_trigger_cold_fallback(self):
+        replies = [{"version": 6}, [{"sessionId": "__workbuddy_cli_host__synthetic",
+                    "acpEndpoint": "http://127.0.0.1:3456/api/v1/acp"}],
+                   {"text": "http://127.0.0.1:3456/?password=SYNTHETIC-PRIVATE"}]
+        with patch.object(discovery, "app_info", return_value={"version": "5.6.2", "intel_binary": True}), \
+                patch.object(discovery, "find_sockets", return_value=[(self.path, 123)]), \
+                patch.object(discovery, "rpc", side_effect=replies), \
+                patch.object(discovery, "auth_status", side_effect=discovery.WorkBuddyError("auth failed")), \
+                self.assertRaises(discovery.WorkBuddyError) as caught:
+            discovery.discover(for_write=True)
+        self.assertNotEqual(caught.exception.kind, "cold_start")
+        self.assertNotIn("SYNTHETIC-PRIVATE", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -129,7 +129,7 @@ class RecoveryTests(unittest.TestCase):
         with patch.object(adapter, "discover", return_value=desktop) as discover, \
                 patch.object(adapter, "app_info", return_value=info), \
                 patch.object(adapter, "rpc", side_effect=control), \
-                patch.object(adapter, "auth_status", return_value={"authenticated": True}), \
+                patch.object(adapter, "auth_status", return_value={"authenticated": True, "auth_enabled": True}), \
                 patch.object(adapter, "AcpClient", return_value=acp) as client:
             result = instance.run("Perform a synthetic task")
 
@@ -165,6 +165,167 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(model_event["model"]["auto_compact_window_requested"], 1000000)
         self.assertNotIn("SYNTHETIC-SECRET", repr(events))
         human_permission.assert_not_called()
+
+
+class ColdStartTests(unittest.TestCase):
+    def cold_fixture(self):
+        events = []
+        instance = adapter.WorkBuddyAdapter("11111111-2222-4333-8444-555555555555",
+                                           "/tmp", events.append, Mock(),
+                                           model="glm-5.3-flash", context_tokens=1000000)
+        info = {"executable": Path("/synthetic/WorkBuddy.app/Contents/MacOS/Electron"),
+                "cli": Path("/synthetic/WorkBuddy.app/Contents/Resources/app.asar/cli/bin/codebuddy"),
+                "cli_entry_present": True}
+        runtime = Mock()
+        runtime.runtime = {"launcher": "owned", "task_id": instance.task_id, "pid": 4321}
+        runtime.start.return_value = ("http://127.0.0.1:3456/api/v1/acp", "SYNTHETIC-GATEWAY-SECRET")
+        runtime.lost.is_set.return_value = False
+        runtime._closed.is_set.return_value = False
+        runtime.stop.return_value = {"cleaned": True}
+        acp = Mock()
+        acp.new_session.return_value = "synthetic-cold-session"
+        acp.select_model.return_value = {"id": "glm-5.3-flash", "selection_confirmed": True,
+                                         "max_input_tokens": 1000000}
+        acp.select_context.return_value = {"context_tokens": 1000000}
+        acp.prompt.return_value = {"stop_reason": "end_turn", "answer": "done"}
+        return instance, events, info, runtime, acp
+
+    def test_cold_launch_omits_early_model_and_selects_advertised_model_before_prompt(self):
+        instance, events, info, runtime, acp = self.cold_fixture()
+        with patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
+                patch.object(adapter, "app_info", return_value=info), \
+                patch.object(adapter, "OwnedRuntime", return_value=runtime) as launch, \
+                patch.object(adapter, "AcpClient", return_value=acp), patch.object(adapter, "rpc") as rpc:
+            result = instance.run("synthetic prompt")
+            cleanup = instance.close()
+        args = launch.call_args.args[2]
+        self.assertEqual(args[0], str(info["cli"]))
+        self.assertNotIn("--model", args)
+        self.assertNotIn("glm-5.3-flash", args)
+        self.assertEqual(args[args.index("--autocompact") + 1], "1000000")
+        for option in ["--permission-mode", "--permission-mode-before-plan"]:
+            self.assertEqual(args[args.index(option) + 1], "default")
+        acp.request.assert_called_once_with("session/set_config_option", {
+            "sessionId": "synthetic-cold-session", "configId": "mode", "value": "default"})
+        acp.select_model.assert_called_once_with("glm-5.3-flash")
+        acp.select_context.assert_called_once_with(1000000, acp.select_model.return_value)
+        methods = [call[0] for call in acp.method_calls]
+        self.assertLess(methods.index("request"), methods.index("select_model"))
+        self.assertLess(methods.index("select_model"), methods.index("select_context"))
+        self.assertLess(methods.index("select_context"), methods.index("prompt"))
+        acp.prompt.assert_called_once()
+        self.assertNotIn("SYNTHETIC-GATEWAY-SECRET", repr(events))
+        self.assertEqual(result["stop_reason"], "end_turn")
+        self.assertEqual(cleanup, {"cleaned": True})
+        runtime.stop.assert_called_once()
+        rpc.assert_not_called()
+
+    def test_unadvertised_cold_model_never_submits_prompt(self):
+        instance, events, info, runtime, acp = self.cold_fixture()
+        acp.select_model.side_effect = WorkBuddyError("model not advertised")
+        with patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
+                patch.object(adapter, "app_info", return_value=info), \
+                patch.object(adapter, "OwnedRuntime", return_value=runtime), \
+                patch.object(adapter, "AcpClient", return_value=acp):
+            with self.assertRaises(WorkBuddyError):
+                instance.run("must not submit")
+            self.assertEqual(instance.close(), {"cleaned": True})
+        acp.select_context.assert_not_called()
+        acp.prompt.assert_not_called()
+        self.assertNotIn("running", [event["type"] for event in events])
+        runtime.stop.assert_called_once()
+
+    def test_unsupported_cold_context_never_submits_prompt(self):
+        instance, events, info, runtime, acp = self.cold_fixture()
+        acp.select_context.side_effect = WorkBuddyError("context exceeds advertised budget")
+        with patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
+                patch.object(adapter, "app_info", return_value=info), \
+                patch.object(adapter, "OwnedRuntime", return_value=runtime), \
+                patch.object(adapter, "AcpClient", return_value=acp):
+            with self.assertRaises(WorkBuddyError):
+                instance.run("must not submit")
+            self.assertEqual(instance.close(), {"cleaned": True})
+        acp.select_model.assert_called_once_with("glm-5.3-flash")
+        acp.prompt.assert_not_called()
+        self.assertNotIn("running", [event["type"] for event in events])
+        runtime.stop.assert_called_once()
+
+    def test_cancel_or_runtime_loss_in_running_callback_cannot_submit_prompt(self):
+        for action in ["cancel", "lost"]:
+            instance, events, info, runtime, acp = self.cold_fixture()
+            def callback(event):
+                events.append(event)
+                if event["type"] == "running":
+                    if action == "cancel":
+                        instance._cancel.set()
+                    else:
+                        runtime.lost.is_set.return_value = True
+            instance.on_event = callback
+            with self.subTest(action=action), \
+                    patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
+                    patch.object(adapter, "app_info", return_value=info), \
+                    patch.object(adapter, "OwnedRuntime", return_value=runtime), \
+                    patch.object(adapter, "AcpClient", return_value=acp):
+                with self.assertRaises(WorkBuddyError):
+                    instance.run("must not submit")
+                instance.close()
+            acp.prompt.assert_not_called()
+
+    def test_health_is_read_only_and_does_not_claim_cold_account_authentication(self):
+        with patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
+                patch.object(adapter, "gui_identity", return_value={"pid": 123, "start": "synthetic"}), \
+                patch.object(adapter, "OwnedRuntime") as launch:
+            result = adapter.health()
+        self.assertTrue(result["available"])
+        self.assertTrue(result["read_only"])
+        self.assertTrue(result["ready_for_task"])
+        self.assertFalse(result["runtime_ready"])
+        self.assertIsNone(result["authenticated"])
+        self.assertEqual(result["execution_mode"], "owned_cold_start")
+        self.assertEqual(result["bridge_version"], adapter.__version__)
+        launch.assert_not_called()
+
+    def test_unavailable_or_unsupported_channel_cannot_fall_back_to_own_launcher(self):
+        for kind in ["unavailable", ""]:
+            with self.subTest(kind=kind), \
+                    patch.object(adapter, "discover", side_effect=WorkBuddyError("guard", kind=kind)), \
+                    patch.object(adapter, "gui_identity") as gui, \
+                    patch.object(adapter, "OwnedRuntime") as launch:
+                self.assertFalse(adapter.health()["available"])
+                instance = adapter.WorkBuddyAdapter("11111111-2222-4333-8444-555555555555",
+                                                   "/tmp", Mock(), Mock())
+                with self.assertRaises(WorkBuddyError):
+                    instance.run("synthetic task")
+                gui.assert_not_called()
+                launch.assert_not_called()
+
+    def test_missing_gui_remains_unavailable_without_launching(self):
+        with patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
+                patch.object(adapter, "gui_identity", side_effect=WorkBuddyError("missing GUI")), \
+                patch.object(adapter, "OwnedRuntime") as launch:
+            self.assertFalse(adapter.health()["available"])
+        launch.assert_not_called()
+
+    def test_owned_recovery_delegates_to_identity_guarded_cleaner(self):
+        runtime = {"launcher": "owned", "task_id": "synthetic"}
+        with patch.object(adapter, "recover_owned", return_value={"cleaned": False}) as recover, \
+                patch.object(adapter, "find_sockets") as sockets, patch.object(adapter, "rpc") as rpc:
+            self.assertFalse(adapter.recover_runtime(runtime)["cleaned"])
+        recover.assert_called_once_with(runtime)
+        sockets.assert_not_called()
+        rpc.assert_not_called()
+
+    def test_owned_cleanup_result_is_preserved_and_client_closed_first(self):
+        instance = adapter.WorkBuddyAdapter("11111111-2222-4333-8444-555555555555",
+                                           "/tmp", Mock(), Mock())
+        order = []
+        instance.client = Mock()
+        instance.client.close.side_effect = lambda: order.append("client")
+        instance.owned = Mock()
+        instance.owned.stop.side_effect = lambda: order.append("worker") or {"cleaned": False}
+        self.assertEqual(instance.close(), {"cleaned": False})
+        self.assertEqual(order, ["client", "worker"])
+        self.assertIsNone(instance.client)
 
 
 if __name__ == "__main__":

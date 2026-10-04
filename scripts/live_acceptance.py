@@ -29,12 +29,12 @@ async def call(session, name, arguments=None):
 def timestamp():
     return datetime.now(timezone.utc).isoformat()
 
-async def finish(session, task, *, policy='reject', cwd=None, timeout=180):
+async def finish(session, task, *, policy='reject', cwd=None, timeout=180, allowed_command=None):
     deadline = time.monotonic() + timeout
     requests = []
     while time.monotonic() < deadline:
         state = await call(session, 'wait_task', {'task_id': task['task_id'], 'timeout_seconds': 10})
-        if state['status'] in TERMINAL:
+        if state['status'] in TERMINAL and not state.get('cleanup_pending', False):
             return state, await call(session, 'get_result', {'task_id': task['task_id']}), requests
         if state['status'] == 'permission_required':
             request = state['permission_request']
@@ -42,6 +42,8 @@ async def finish(session, task, *, policy='reject', cwd=None, timeout=180):
             in_scope = cwd is not None and bool(locations) and all(isinstance(item.get('path'), str)
                 and Path(item['path']).resolve().is_relative_to(cwd.resolve()) for item in locations)
             permit = policy == 'test_file' and in_scope and request.get('kind') in {'edit', 'write'}
+            permit = permit or (policy == 'test_bash' and request.get('kind') == 'execute'
+                and allowed_command is not None and request.get('input', {}).get('command') == allowed_command)
             kind = 'allow_once' if permit else 'reject_once'
             choice = next((option['optionId'] for option in request['options'] if option['kind'] == kind), None)
             if not choice:
@@ -53,7 +55,7 @@ async def finish(session, task, *, policy='reject', cwd=None, timeout=180):
     await call(session, 'cancel_task', {'task_id': task['task_id']})
     raise TimeoutError('Acceptance task exceeded deadline')
 
-async def run(cases):
+async def run(cases, model="deepseek-v4.1-flash", context_tokens=None):
     LIVE.mkdir(parents=True, exist_ok=True, mode=0o700)
     env = dict(os.environ)
     env['WORKBUDDY_BRIDGE_STATE_DIR'] = str(LIVE / 'tasks')
@@ -73,7 +75,7 @@ async def run(cases):
                 entry = {'started_at': timestamp()}
                 print(f'Starting {case}', flush=True)
                 if case == 'text':
-                    task = await call(session, 'start_task', {'cwd': str(directory),
+                    task = await call(session, 'start_task', {'model': model, 'context_tokens': context_tokens, 'cwd': str(directory),
                         'prompt': '桥接通信验收。不要调用工具、访问文件或网络。请仅回复：INTELMAC_MCP_OK'})
                     early = await call(session, 'wait_task', {'task_id': task['task_id'], 'timeout_seconds': 0.01})
                     entry['wait_timeout_kept_task'] = early['wait_timed_out'] and not early['cancel_requested']
@@ -83,15 +85,25 @@ async def run(cases):
                 elif case == 'file':
                     target = directory / 'bridge-result.txt'
                     if target.exists(): target.unlink()
-                    task = await call(session, 'start_task', {'cwd': str(directory), 'prompt':
+                    task = await call(session, 'start_task', {'model': model, 'context_tokens': context_tokens, 'cwd': str(directory), 'prompt':
                         f'文件回收验收。使用写入文件工具在 {target} 新建一个纯文本文件，完整内容为 INTELMAC_FILE_OK。'
                         '只创建这个文件，不调用 shell 或网络、不访问其他文件。完成后简短说明路径。'})
                     state, result, permissions = await finish(session, task, policy='test_file', cwd=directory)
                     entry.update(task_id=task['task_id'], status=state['status'], permissions=permissions, result=result,
                         passed=state['status']=='succeeded' and target.is_file() and target.read_text().strip()=='INTELMAC_FILE_OK'
                         and any(item['path']==str(target) for item in result['artifacts']))
+                elif case == 'bash':
+                    target = directory / 'bash-result.txt'
+                    command = f'printf INTELMAC_BASH_OK > "{target}"'
+                    task = await call(session, 'start_task', {'model': model, 'context_tokens': context_tokens,
+                        'cwd': str(directory), 'prompt': 'Bash 工具验收。只用 Bash 执行一次以下命令：' + command +
+                        '。不要访问网络或其他文件，不改用其他工具。如果失败就停止并说明。'})
+                    state, result, permissions = await finish(session, task, policy='test_bash', cwd=directory, allowed_command=command)
+                    entry.update(task_id=task['task_id'],status=state['status'],permissions=permissions,result=result,
+                        passed=state['status']=='succeeded' and target.is_file() and target.read_text().strip()=='INTELMAC_BASH_OK'
+                        and any(item['choice']=='allow_once' for item in permissions))
                 elif case == 'cancel':
-                    task = await call(session, 'start_task', {'cwd': str(directory), 'prompt':
+                    task = await call(session, 'start_task', {'model': model, 'context_tokens': context_tokens, 'cwd': str(directory), 'prompt':
                         '取消测试。不要调用工具、访问文件或网络。连续输出2000条不同的中文研究问题，每条详细解释，尽量完整。'})
                     deadline = time.monotonic() + 120
                     while time.monotonic() < deadline:
@@ -106,7 +118,7 @@ async def run(cases):
                 elif case == 'permission':
                     outside = LIVE / 'permission-outside.txt'
                     if outside.exists(): outside.unlink()
-                    task = await call(session, 'start_task', {'cwd': str(directory), 'prompt':
+                    task = await call(session, 'start_task', {'model': model, 'context_tokens': context_tokens, 'cwd': str(directory), 'prompt':
                         f'权限拒绝验收。尝试使用 Bash 工具执行命令 printf INTELMAC_PERMISSION_TEST > "{outside}"。'
                         '该文件位于工作目录之外。只尝试一次，如果权限被拒绝就停止并说明，不换工具或再次申请权限。'})
                     state, result, permissions = await finish(session, task)
@@ -114,6 +126,8 @@ async def run(cases):
                         outside_file_created=outside.exists(), passed=bool(permissions)
                         and all(item['choice']=='reject_once' for item in permissions) and not outside.exists())
                 else: raise ValueError('Unknown case')
+                entry['cleanup_confirmed'] = result.get('cleanup_confirmed', False)
+                entry['passed'] = entry['passed'] and entry['cleanup_confirmed']
                 entry['finished_at'] = timestamp()
                 report['cases'][case] = entry
                 report['updated_at'] = timestamp()
@@ -126,7 +140,11 @@ async def run(cases):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run',action='store_true',help='Run real model tasks using the WorkBuddy account')
-    parser.add_argument('--cases',nargs='+',choices=['text','file','cancel','permission'],default=['text','file','cancel','permission'])
+    parser.add_argument('--cases',nargs='+',choices=['text','file','bash','cancel','permission'],default=['text','file','cancel','permission'])
+    parser.add_argument('--output', type=Path, default=LIVE, help='独立验收记录目录')
+    parser.add_argument('--model', choices=['deepseek-v4.1-flash','glm-5.3-flash'], default='deepseek-v4.1-flash')
+    parser.add_argument('--context-tokens', type=int, choices=[300000,600000,1000000])
     args=parser.parse_args()
+    LIVE=args.output.resolve()
     if not args.run: parser.error('Use --run to execute real model tasks')
-    raise SystemExit(0 if asyncio.run(run(args.cases)) else 1)
+    raise SystemExit(0 if asyncio.run(run(args.cases,args.model,args.context_tokens)) else 1)

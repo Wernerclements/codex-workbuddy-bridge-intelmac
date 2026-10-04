@@ -1,6 +1,6 @@
 """整应用正常退出/重启验收。默认只预览；--run 才执行真实任务和应用退出。
 
-不调用 health，不强杀应用或 sidecar。脱敏报告写入忽略的 .local 目录。
+不调用 MCP health；仅执行只读健康探测，不强杀应用或 sidecar。脱敏报告写入忽略的 .local 目录。
 """
 from __future__ import annotations
 
@@ -27,10 +27,10 @@ PLAN = [
     '使用独立记录/工作目录，通过 MCP 提交默认 DeepSeek 的纯文本任务。',
     '确认 prompt_accepted 且尚未终止后，使用 AppleScript 正常退出 WorkBuddy。',
     '检查旧 GUI 进程退出，分别记录原 sidecar 是否保留，不强杀应用进程。',
-    '记录原任务实际终态；任务可以继续完成，不推断退出必然导致失败。',
-    '正常重新打开 WorkBuddy，通过只读 discover 确认认证，不调用 health。',
+    '等待原任务 uncertain 与自有资源清理确认；意外成功不算中断验收通过。',
+    '重新打开 WorkBuddy，只读确认唯一 GUI 与 ready_for_task；此时不宣称认证通过。',
     '相同 request_id 重试原任务，确认返回原记录且没有重新提交。',
-    '执行短文本恢复任务，并使用相同 request_id 重试验证幂等。',
+    '新自有 worker 短任务成功并清理确认后，再确认认证恢复；重复请求验证幂等。',
     '保存脱敏结果；finally 尽力重新打开应用，只清理本脚本创建的 worker。',
 ]
 
@@ -67,11 +67,18 @@ async def call(session, name, arguments=None):
 
 
 async def probe():
-    # The child keeps credentials in memory. Its output excludes host/session IDs,
-    # endpoints and captured buffers. PID is used internally, never in the report.
-    code = ('import json; from workbuddy_bridge_intelmac.discovery import discover; '
-            'd=discover(); print(json.dumps({"version":d.version,"protocol":d.protocol,'
-            '"authenticated":True,"sidecar_pid":d.sidecar_pid}))')
+    # Only public readiness and an internal GUI identity are returned. A cold
+    # desktop has no authenticated runtime yet; this probe never creates one.
+    code = (
+        'import json; from workbuddy_bridge_intelmac.adapter import health; '
+        'from workbuddy_bridge_intelmac.owned_runtime import gui_identity; '
+        'from workbuddy_bridge_intelmac.discovery import find_sockets; '
+        'h=health(); g=gui_identity(); '
+        'r={k:h.get(k) for k in ("available","version","protocol","authenticated","supported","execution_mode")}; '
+        'r["ready_for_task"]=h.get("ready_for_task",h.get("available",False)); '
+        'r["runtime_ready"]=h.get("runtime_ready",h.get("authenticated") is True); '
+        'r["gui"]=g; r["sidecar_pids"]=sorted({pid for _,pid in find_sockets()}); '
+        'print(json.dumps(r))')
     return json.loads(await command([sys.executable, '-c', code], timeout=25))
 
 
@@ -81,27 +88,6 @@ async def process_identity(pid):
         return output or None
     except RuntimeError:
         return None
-
-
-async def gui_identities(sidecar_pid):
-    # Full arguments are inspected only in memory to distinguish the GUI from
-    # Electron workers. They must never be logged or saved in the report.
-    output = await command(['ps', '-axo', 'uid=,pid=,args='], timeout=5)
-    prefix = str(APP / 'Contents/MacOS/Electron')
-    found = {}
-    for line in output.splitlines():
-        parts = line.strip().split(maxsplit=2)
-        if len(parts) != 3 or parts[0] != str(os.getuid()):
-            continue
-        pid = int(parts[1])
-        arguments = parts[2]
-        if (pid == sidecar_pid or not (arguments == prefix or arguments.startswith(prefix + ' '))
-                or '--serve' in arguments or 'sidecar' in arguments.lower()):
-            continue
-        identity = await process_identity(pid)
-        if identity:
-            found[pid] = identity
-    return found
 
 
 async def gui_running(bundle):
@@ -128,11 +114,15 @@ async def finish(session, task_id, timeout=180):
     while time.monotonic() < deadline:
         state = await call(session, 'wait_task', {'task_id': task_id, 'timeout_seconds': 5})
         if state['status'] in TERMINAL:
-            return state, await call(session, 'get_result', {'task_id': task_id})
+            if state.get('cleanup_confirmed') is True and state.get('cleanup_pending') is not True:
+                return state, await call(session, 'get_result', {'task_id': task_id})
+            # wait_task returns immediately for terminal tasks; poll without spinning.
+            await asyncio.sleep(0.2)
+            continue
         if state['status'] == 'permission_required':
             await call(session, 'cancel_task', {'task_id': task_id})
             raise RuntimeError('纯文本验收出现权限请求；已取消，未自动授权')
-    raise TimeoutError('任务终态未在期限内确认')
+    raise TimeoutError('任务终态与清理未在期限内确认')
 
 
 def same_task(before, after):
@@ -150,7 +140,19 @@ def write_report(path, report):
     os.replace(temporary, path)
 
 
-async def run(timeout_seconds=600):
+async def wait_permission(session, task_id, timeout=180):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = await call(session, 'get_task', {'task_id': task_id})
+        if state['status'] == 'permission_required' and state.get('permission_request', {}).get('kind') == 'execute':
+            return state
+        if state['status'] in TERMINAL:
+            raise RuntimeError('未进入工具权限等待，不能执行本项退出验收')
+        await asyncio.sleep(0.2)
+    raise TimeoutError('权限等待验收超时')
+
+
+async def run(timeout_seconds=600, interrupt_mode='stream'):
     if sys.platform != 'darwin':
         raise RuntimeError('真实应用退出验收仅适用于 macOS')
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
@@ -162,7 +164,7 @@ async def run(timeout_seconds=600):
     cwd.mkdir(mode=0o700)
     report_path = directory / 'report.json'
     report = {'started_at': stamp(), 'passed': False, 'stage': 'preflight',
-              'calls_health': False, 'model': 'deepseek-v4.1-flash', 'cases': {}}
+              'calls_mcp_health': False, 'uses_read_only_health_probe': True, 'interrupt_mode': interrupt_mode, 'model': 'deepseek-v4.1-flash', 'cases': {}}
     owned = {}
     env = dict(os.environ)
     env['WORKBUDDY_BRIDGE_STATE_DIR'] = str(directory / 'tasks')
@@ -177,12 +179,20 @@ async def run(timeout_seconds=600):
             initial = await probe()
             if not await gui_running(bundle):
                 raise RuntimeError('验收前应用 GUI 未运行')
-            old_gui = await gui_identities(initial['sidecar_pid'])
-            if not old_gui:
-                raise RuntimeError('无法识别原 GUI 主进程，暂不退出应用')
-            old_sidecar = await process_identity(initial['sidecar_pid'])
-            report['initial'] = {key: initial[key] for key in ('version', 'protocol', 'authenticated')}
-            report['initial']['gui_process_count'] = len(old_gui)
+            if initial.get('ready_for_task') is not True:
+                raise RuntimeError('桌面尚未准备好接受任务')
+            gui = initial['gui']
+            if type(gui.get('pid')) is not int or gui['pid'] <= 1 or not isinstance(gui.get('start'), str):
+                raise RuntimeError('无法识别唯一原 GUI 主进程，暂不退出应用')
+            gui_process = await process_identity(gui['pid'])
+            if not gui_process:
+                raise RuntimeError('原 GUI 进程身份已失效，暂不退出应用')
+            old_gui = {gui['pid']: gui_process}
+            old_sidecars = {pid: await process_identity(pid) for pid in initial.get('sidecar_pids', [])}
+            report['initial'] = {key: initial.get(key) for key in
+                                ('version', 'protocol', 'authenticated', 'ready_for_task', 'runtime_ready')}
+            report['initial']['gui_process_count'] = 1
+            report['initial']['old_sidecar_present'] = bool(old_sidecars)
             async with stdio_client(parameters) as (reader, writer):
                 async with ClientSession(reader, writer) as session:
                     await session.initialize()
@@ -190,9 +200,13 @@ async def run(timeout_seconds=600):
                         report['stage'] = 'start_interruption_task'
                         interrupted_args = {'cwd': str(cwd), 'request_id': 'desktop-interruption-' + run_id,
                             'prompt': '通信中断验收。不要使用工具、文件或网络。写一篇约1500字的中文研究方法教材，详细说明问题、资料、分析、写作和复核。'}
+                        if interrupt_mode == 'permission':
+                            target = cwd / 'permission-must-not-exist.txt'
+                            interrupted_args['prompt'] = f'权限等待中断测试。只用 Bash 尝试执行 printf PERMISSION_TEST > "{target}"，保留权限请求，不使用其他工具或访问网络。'
                         interrupted = await call(session, 'start_task', interrupted_args)
                         owned[interrupted['task_id']] = None
-                        accepted = await wait_accepted(session, interrupted['task_id'])
+                        accepted = await (wait_permission(session, interrupted['task_id']) if interrupt_mode == 'permission'
+                                          else wait_accepted(session, interrupted['task_id']))
                         owned[interrupted['task_id']] = accepted.get('runtime')
                         report['stage'] = 'normal_quit'
                         await command(['osascript', '-e', f'tell application id "{bundle}" to quit'], timeout=15)
@@ -205,28 +219,14 @@ async def run(timeout_seconds=600):
                                 exited = True
                                 break
                             await asyncio.sleep(1)
-                        sidecar_exited = await process_identity(initial['sidecar_pid']) != old_sidecar
+                        sidecar_exited = (all([await process_identity(pid) != identity
+                                              for pid, identity in old_sidecars.items()]) if old_sidecars else None)
                         report['cases']['normal_quit'] = {'gui_exited': exited,
                             'old_sidecar_exited': sidecar_exited, 'passed': exited,
                             'non_owned_processes_signalled': False}
                         write_report(report_path, report)
                         if not exited:
                             raise RuntimeError('应用未正常退出；未强制结束，实际退出验收未完成')
-                        report['stage'] = 'reopen_and_authenticate'
-                        await command(['open', '-a', str(APP)], timeout=10)
-                        deadline = time.monotonic() + 100
-                        restored = None
-                        while time.monotonic() < deadline:
-                            try:
-                                restored = await probe()
-                                break
-                            except (RuntimeError, TimeoutError, json.JSONDecodeError):
-                                await asyncio.sleep(1)
-                        if restored is None:
-                            raise TimeoutError('应用重开后认证通道未在期限内恢复')
-                        report['cases']['reopen'] = {'authenticated': True,
-                            'new_sidecar': restored['sidecar_pid'] != initial['sidecar_pid'],
-                            'version': restored['version'], 'protocol': restored['protocol'], 'passed': True}
                         report['stage'] = 'interrupted_task_outcome'
                         state, result = await finish(session, interrupted['task_id'], timeout=60)
                         owned[interrupted['task_id']] = state.get('runtime')
@@ -234,7 +234,33 @@ async def run(timeout_seconds=600):
                         idempotent = same_task(state, retried)
                         report['cases']['interrupted_task'] = {'status': state['status'],
                             'partial': bool(result.get('partial')), 'same_record_on_retry': idempotent,
-                            'passed': state['status'] in {'uncertain', 'failed', 'succeeded'} and idempotent}
+                            'permission_cleared': state.get('permission_request') is None,
+                            'permission_test_file_absent': interrupt_mode != 'permission' or not target.exists(),
+                            'cleanup_confirmed': state.get('cleanup_confirmed') is True,
+                            'passed': state['status'] == 'uncertain' and idempotent
+                            and state.get('permission_request') is None
+                            and (interrupt_mode != 'permission' or not target.exists())
+                            and state.get('cleanup_confirmed') is True and not state.get('cleanup_pending')}
+                        write_report(report_path, report)
+                        report['stage'] = 'reopen_and_ready'
+                        await command(['open', '-a', str(APP)], timeout=10)
+                        deadline = time.monotonic() + 100
+                        restored = None
+                        while time.monotonic() < deadline:
+                            try:
+                                candidate = await probe()
+                                if candidate.get('ready_for_task') is True and await gui_running(bundle):
+                                    restored = candidate
+                                    break
+                            except (RuntimeError, TimeoutError, json.JSONDecodeError):
+                                pass
+                            await asyncio.sleep(1)
+                        if restored is None:
+                            raise TimeoutError('应用重开后未在期限内确认唯一 GUI 和任务就绪')
+                        report['cases']['reopen'] = {'ready_for_task': True,
+                            'authenticated': None, 'authentication_source': 'not_verified_yet',
+                            'new_gui': restored['gui'] != initial['gui'],
+                            'version': restored.get('version'), 'protocol': restored.get('protocol'), 'passed': False}
                         report['stage'] = 'short_task_after_restart'
                         short_args = {'cwd': str(cwd), 'request_id': 'desktop-restored-' + run_id,
                             'prompt': '桥接恢复验收。不要使用工具、文件或网络。只回复：INTELMAC_DESKTOP_RESTART_OK'}
@@ -244,11 +270,18 @@ async def run(timeout_seconds=600):
                         owned[short['task_id']] = state.get('runtime')
                         retried = await call(session, 'start_task', short_args)
                         idempotent = same_task(state, retried)
+                        owned_launcher = (state.get('runtime') or {}).get('launcher') == 'owned'
+                        short_passed = (state['status'] == 'succeeded' and idempotent and owned_launcher
+                                        and state.get('cleanup_confirmed') is True and not state.get('cleanup_pending')
+                                        and result.get('summary', '').strip() == 'INTELMAC_DESKTOP_RESTART_OK')
                         report['cases']['short_task'] = {'status': state['status'],
                             'expected_response': result.get('summary', '').strip() == 'INTELMAC_DESKTOP_RESTART_OK',
-                            'same_record_on_retry': idempotent,
-                            'passed': state['status'] == 'succeeded' and idempotent
-                            and result.get('summary', '').strip() == 'INTELMAC_DESKTOP_RESTART_OK'}
+                            'same_record_on_retry': idempotent, 'owned_launcher': owned_launcher,
+                            'cleanup_confirmed': state.get('cleanup_confirmed') is True, 'passed': short_passed}
+                        if short_passed:
+                            report['cases']['reopen'].update(authenticated=True,
+                                authentication_source='new_owned_worker_task',
+                                passed=report['cases']['reopen']['new_gui'])
                         report['passed'] = all(case['passed'] for case in report['cases'].values())
                     finally:
                         try:
@@ -275,7 +308,7 @@ async def run(timeout_seconds=600):
         except Exception as error:
             report['cleanup']['reopen_error_type'] = type(error).__name__
         code = ('import sys,json; from workbuddy_bridge_intelmac.adapter import recover_runtime; '
-                'r=recover_runtime(json.load(sys.stdin)); print(json.dumps({"cleaned":bool(r.get("cleaned"))}))')
+                'r=recover_runtime(json.load(sys.stdin)); print(json.dumps({"cleaned":r.get("cleaned") is True}))')
         report['cleanup']['workers'] = []
         for runtime in owned.values():
             if not runtime:
@@ -287,11 +320,22 @@ async def run(timeout_seconds=600):
                 report['cleanup']['workers'].append(result)
             except Exception as error:
                 report['cleanup']['workers'].append({'error_type': type(error).__name__})
+        report['cleanup']['passed'] = cleanup_passed(report)
+        report['passed'] = report['passed'] and report['cleanup']['passed'] and 'error_type' not in report
         report['finished_at'] = stamp()
         write_report(report_path, report)
         write_report(LIVE / 'report.json', report)
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
     return report['passed']
+
+
+def cleanup_passed(report):
+    cleanup = report.get('cleanup', {})
+    workers = cleanup.get('workers', [])
+    return (cleanup.get('reopen_command_succeeded') is True
+            and not report.get('mcp_cleanup_timed_out')
+            and len(workers) == cleanup.get('owned_workers', -1)
+            and all(worker.get('cleaned') is True for worker in workers))
 
 
 def main():
@@ -301,13 +345,14 @@ def main():
     group.add_argument('--dry-run', action='store_true', help='仅预览，不访问应用或发起任务（默认）')
     parser.add_argument('--timeout-seconds', type=int, default=600,
                         help='主流程总时限，120–900秒；MCP清理另限12秒，应用恢复/自有worker清理另限38秒')
+    parser.add_argument('--interrupt-mode', choices=['stream','permission'], default='stream')
     args = parser.parse_args()
     if not 120 <= args.timeout_seconds <= 900:
         parser.error('总时限必须在120到900秒之间')
     if not args.run:
         print(json.dumps({'dry_run': True, 'calls_health': False, 'steps': PLAN}, ensure_ascii=False, indent=2))
         return 0
-    return 0 if asyncio.run(run(args.timeout_seconds)) else 1
+    return 0 if asyncio.run(run(args.timeout_seconds,args.interrupt_mode)) else 1
 
 
 if __name__ == '__main__':

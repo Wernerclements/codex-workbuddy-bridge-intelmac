@@ -85,7 +85,7 @@ async def run():
                 if pid<=1 or str(pidfile) not in command or 'workbuddy_bridge_intelmac.server' not in command:
                     raise RuntimeError('MCP process identity does not match the test')
                 os.kill(pid,signal.SIGKILL)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(1.5)
     except Exception as error:
         # Process death can make the stdio transport report an expected EOF.
         report['transport_exit_type']=type(error).__name__
@@ -106,6 +106,8 @@ async def run():
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run',action='store_true')
+    p.add_argument('--output',type=Path,default=LIVE,help='独立验收记录目录')
     args=p.parse_args()
+    LIVE=args.output.resolve()
     if not args.run:p.error('Use --run to execute real model tasks')
     raise SystemExit(0 if asyncio.run(run()) else 1)

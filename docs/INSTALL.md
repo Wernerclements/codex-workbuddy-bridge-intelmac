@@ -1,6 +1,6 @@
 # 安装与卸载
 
-项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、已登录。
+项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前说明对应 alpha.3 发布候选，实际发布状态以仓库 Release 为准。
 
 ## 环境要求
 
@@ -51,9 +51,11 @@ python3 scripts/install.py --allow-source-build
 
 该选项只允许依赖安装从源码构建，不代为安装编译工具。编译还可能需要兼容的 OpenSSL 开发文件；现有工具链是否能完成编译，以实际依赖安装结果为准。安装失败可以在修复环境后重复执行，已创建的自有环境会保留。
 
-**alpha.2 冷启动限制：** WorkBuddy 5.6.2 的 sidecar/CLI Host 按需启动，已登录主界面不保证执行通道存在。整应用退出后恢复测试未通过；当前安装仍需内部通道已经运行，不能承诺冷启动自动就绪。
+**alpha.3 冷启动：** 不要求 sidecar/CLI Host 事先运行。已登录 GUI 的唯一实例存在时，实际任务可创建自己的应用内置运行时。原生受保护字段握手与产品配置缓存必须可用；未知应用版本、缺失保护材料或不安全的缓存文件会明确失败。无需另配模型 API 或手工导出登录凭证。设计和维护说明见 [冷启动设计](COLD_START.md)。
 
-安装完成后，在 Codex 中重新加载 MCP 服务；若当前版本没有独立的重新加载入口，重启 Codex.app。先调用桥接器的 `health` 查看 WorkBuddy 连接，再在独立目录执行一个小型验收任务。
+安装完成后，在 Codex 中重新加载 MCP 服务；若当前版本没有独立的重新加载入口，重启 Codex.app。先调用桥接器的 `health` 查看状态，再在独立目录执行一个小型验收任务。
+
+只读 health 不创建 worker：没有 sidecar 时，`ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件、运行时尚未启动、认证尚未验证，可继续启动任务；`available=false` 时先按错误处理。实际任务成功后，再核对 WorkBuddy 账号与新用量。更新源码后已有 MCP 进程仍可能使用旧代码，须重新加载或完全重启 Codex；旧版原生 health 通过不替代这一步。
 
 ## 配置如何处理
 

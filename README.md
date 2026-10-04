@@ -1,8 +1,8 @@
 # Codex WorkBuddy Bridge · intelmac
 
-让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与登录配置；已通过用户账号用量页核对订阅扣减。
+让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。旧暖启动任务的订阅扣减已核对，本轮冷启动新用量仍待用户确认。
 
-**开发版 v0.1.0-alpha.2：原生 MCP 加载与指定模型用量已确认。整应用退出后暴露冷启动缺口，正式 v0.1.0 暂不发布。** 安装说明见 [INSTALL](docs/INSTALL.md)。
+**v0.1.0-alpha.3 发布候选：冷启动、权限、取消、故障及整个应用退出/重开真实验收通过。** 实际发布状态以仓库 Release 为准；正式 v0.1.0 仍待 Codex 原生 MCP 加载更新代码、新用量核对及发布检查。安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
 
@@ -12,17 +12,18 @@
 - Skill：可选的使用说明，帮助 Codex 选择工具、等待和汇总结果。
 - 独立桌面应用：后续可加状态菜单，首版不需要。
 
-执行通道使用 WorkBuddy 应用内置 CLI Host、sidecar 与 ACP，账号用量页显示 CLI。用户在 Codex.app 中操作；桥接器启动并管理应用自带的执行运行时。
+执行通道使用 WorkBuddy 应用内置运行时与本机 ACP。内部 sidecar 已运行时使用该通道；没有 sidecar 时，在任务启动时创建本项目自有 worker。用户在 Codex.app 中操作，旧任务用量页的使用端显示 CLI。冷启动设计见 [COLD_START](docs/COLD_START.md)。
 
 ## 已验证
 
-- 本机 macOS 26.5.1 / x86_64，WorkBuddy 5.6.2 的 Intel 可执行文件存在。
-- 可只读发现运行中的 sidecar，读取协议版本 6、会话信息及本机认证状态。
-- 上游完整单元测试：原样 30/31 通过；路径兼容补丁后，加上 3 项回归测试，34/34 通过。
-- [云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml)：Intel macOS 和 Ubuntu 执行完整项目与上游回归；当前本机 152/152 通过（118 项项目测试 + 34 项上游回归），云端以运行记录为准。
-- 原版真实任务测试停在 Windows 实例发现逻辑，尚未向模型发送任务。
+- 2019 Intel Mac / macOS 26.5.1，WorkBuddy **5.6.2**；当前严格限制这个应用版本。
+- GUI 已登录但没有 sidecar 时，双模型短任务与 1m 会话预算通过；预算设置不代表百万 token 满载测试。
+- 文件允许一次、明确 Bash 命令允许一次、目录外 Bash 拒绝、流式取消通过，自有资源清理均确认。
+- 新路径的错误本机凭证、worker 失联和 MCP 服务强制结束/重启通过；中断任务 uncertain，不自动重发。
+- 整个 GUI 在流式输出及等待权限时正常退出/重开通过；权限等待解除、未授权文件未生成，旧请求幂等，新自有任务成功，清理确认。
+- 自动测试结果见 [测试报告](docs/TEST_REPORT.md)；[云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml) 的结果以对应提交的运行记录为准。
 
-开发版在 WorkBuddy 内部通道已经运行时，已通过真实 MCP 文本、文件回收、等待超时、执行中取消、权限拒绝、错误凭证、worker 失联和桥接器重启验收。整应用正常退出及原任务不重发已验证；重开后应用已登录，但按需启动的 sidecar/CLI Host 没有自动出现，恢复认证与新短任务未通过。本轮新增双模型选择与 1m 上下文预算，实际任务通过；现有用户 Skill 可加载，桌面目标 MCP 仍未继承。详细证据、三项待办的严格状态和上游差距见 [验收与差距](docs/AUDIT.md)。
+只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据，目标桌面 MCP 尚未继承。详细范围和待办见 [验收与差距](docs/AUDIT.md)。
 
 ## 文档
 
@@ -31,6 +32,7 @@
 - [桌面连接器适配](docs/CONNECTORS.md)：已验证的协议边界与后续实现顺序。
 - [测试报告](docs/TEST_REPORT.md)：成功、失败及待验证项。
 - [版本兼容](docs/COMPATIBILITY.md)：哪些环境实际测过。
+- [冷启动设计](docs/COLD_START.md)：原生握手、自有资源与更新维护。
 - [上游来源](reference/README.md)：固定版本、许可证与独立补丁。
 
 ## 安装
