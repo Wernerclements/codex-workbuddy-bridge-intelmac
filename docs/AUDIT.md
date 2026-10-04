@@ -1,16 +1,16 @@
 # 验收状态与上游差距
 
-核对日期：2026-10-05（北京时间）。版本：`v0.1.0-alpha.3`，实际发布状态以 Release 为准。正式 `v0.1.0` 尚未发布。
+核对日期：2026-10-05（北京时间）。版本：`v0.1.0`，实际发布状态以 Release 为准；执行逻辑沿用已验收的 alpha.3。
 
 ## 三项待办的严格状态
 
 | 待办 | 当前状态 | 已完成 | 剩余 |
 | --- | --- | --- | --- |
 | #1 单任务通道 | 已关闭 | Intel Mac 发现、应用内置自有运行时、真实文本及文件往返 | 原生桌面专家和任意旧会话不属于已实现能力 |
-| #2 生命周期验收 | 已完成，随本次修复 PR 关闭 | 新冷启动双模型、文件/Bash 允许一次、目录外 Bash 拒绝、流式取消、错误本机凭证、worker 失联、MCP 强制重启；流式与权限等待时整 GUI 退出/重开、幂等、权限等待解除及清理 | 随 #9 合并关闭 |
-| #3 安装与发布 | 开放 | 本机安装、配置保留及备份、Skill、既有 alpha 发布流程；旧暖启动用量与旧版原生 health 确认 | Codex 原生 MCP 加载更新代码；用户核对本轮新用量；最终测试与正式发布 |
+| #2 生命周期验收 | 已关闭 | 新冷启动双模型、文件/Bash 允许一次、目录外 Bash 拒绝、流式取消、错误本机凭证、worker 失联、MCP 强制重启；流式与权限等待时整 GUI 退出/重开、幂等、权限等待解除及清理 | 已由 #9 合并关闭 |
+| #3 安装与发布 | 以仓库 Issue 为准 | 本机安装、配置备份、Skill、232 项本机及云端测试、重启后一次原生健康检查、新路径七条 2.88 积分 | v0.1.0 发布记录与其余请求用量边界见 Release 和测试报告 |
 
-alpha.3 新路径完整真实矩阵已通过，#2 的旧冷启动缺口已有复验；本机 232 项自动测试通过，随本次修复 PR 关闭 #2。#3 尚有明确剩余工作，不能将整个里程碑记为完成。目标桌面 MCP 的 #5 仍开放，未继承。
+alpha.3 新路径完整真实矩阵已通过，#2 的旧冷启动缺口已有复验；本机及云端 232 项自动测试通过，#2 已由 PR #9 关闭。#3 的发布状态以仓库 Issue 和 Release 为准。目标桌面 MCP 的 #5 仍开放，未继承。
 
 ## alpha.3 冷启动与整 GUI 恢复
 
@@ -20,7 +20,7 @@ Deepseek-V4.1-Flash 与 GLM-5.3-Flash 均完成真实短任务、模型回显和
 
 北京时间 23:46:22–23:46:49，初始没有 sidecar，正常退出整个 GUI 后已接受任务 uncertain 且 cleanup_confirmed；相同 request_id 返回原记录无重发。重开后新的 owned 运行时成功短任务，才确认认证，并完成新任务幂等和清理。整体 passed=true，无强杀非自有进程。10 月 5 日 00:00:08–00:00:40 的权限等待 GUI 退出补充验收同样通过；原任务 uncertain、partial=true、等待权限解除、申请文件未生成，幂等、新自有短任务和两个 worker 清理均确认。
 
-本轮真实测试来自独立 MCP stdio，仍需 Codex 原生 MCP 加载本轮代码。新路径未配置独立模型 API；成功云端任务不能代替用户用量核对，新的账号归属与积分扣减待确认。以下旧四次任务 2.26 积分仅证明当时的暖启动路径。当前自动测试最终记录见 [测试报告](TEST_REPORT.md)，早期数量不是本轮合并结果。
+独立 MCP stdio 已完成真实矩阵；用户完全重启 Codex 后，仅一次原生 `health` 确认 `bridge_version=0.1.0a3`、`ready_for_task=true`、`runtime_ready=false`、`authenticated=null`，没有提交任务。新路径未配置独立模型 API；用户账号用量页核对七条 2.88 积分，余下已接受请求的用量未知。旧四次任务的 2.26 积分属于暖启动路径。当前自动测试最终记录见 [测试报告](TEST_REPORT.md)，早期数量不是本轮合并结果。
 
 ## 两个主力模型与上下文
 
@@ -35,7 +35,7 @@ Deepseek-V4.1-Flash 与 GLM-5.3-Flash 均完成真实短任务、模型回显和
 
 上下文设置是 session 内存覆盖，模型参数在 worker 内使用；不修改桌面全局默认模型。自动压缩窗口与上下文预算分别处理，1m 设置不是关闭压缩或 Max 模式。单次 prompt 上限仍为 100000 字符；本次短任务只验证设置与运行时预算，没有测试接近百万 token 的长输入承载或质量。
 
-旧暖启动验收中，用户于 2026-10-04 提供 WorkBuddy 用量页记录并确认消耗正常：北京时间 16:07、16:10、16:20 的 Deepseek-V4.1-Flash 分别扣减 0.60、0.61、0.51 积分，共 1.72；16:08 的 GLM-5.3-Flash 扣减 0.54 积分，合计 2.26。时间和模型与本次四项真实测试对应，使用端显示 CLI。结合此前账号归属与无额外计费提示的确认，两个主力模型当时的订阅复用验收通过；本轮 alpha.3 新路径用量仍待核对。
+旧暖启动验收中，用户于 2026-10-04 提供 WorkBuddy 用量页记录并确认消耗正常：北京时间 16:07、16:10、16:20 的 Deepseek-V4.1-Flash 分别扣减 0.60、0.61、0.51 积分，共 1.72；16:08 的 GLM-5.3-Flash 扣减 0.54 积分，合计 2.26。时间和模型与本次四项真实测试对应，使用端显示 CLI。结合此前账号归属与无额外计费提示的确认，两个主力模型当时的订阅复用验收通过；本轮新路径已有七条 2.88 积分的独立核对，其余请求消耗未知。
 
 ## MCP 与 Skill 继承（alpha.2 证据，缺口仍存在）
 
@@ -55,7 +55,7 @@ Deepseek-V4.1-Flash 与 GLM-5.3-Flash 均完成真实短任务、模型回显和
 
 旧实现启动即创建 Manager 并独占全局任务目录；第一个对话启动成功后，其他对话握手关闭。现改为首次任务操作时创建 Manager，初始化、工具发现与 health 不再拿任务锁。
 
-已在原任务服务持锁时，实际启动两个 stdio 客户端，均完成初始化、7工具发现与 health。此前当前对话缺少原生入口，且设置没有重载/开关；用户于 2026-10-04 在初始化修复后完全退出并打开 Codex.app。随后唯一一次原生 workbuddy_intelmac.health 成功，available、authenticated、supported 均为 true，WorkBuddy 5.6.2、协议6。旧版原生工具加载验收通过，发生在首次退出测试前；alpha.3 仍需更新代码后的原生调用验收。任务操作仍由单个服务持有记录目录；未实现跨对话共享后台调度器，遇到冲突明确报告，不能将初始化修复称为多任务并发已实现。
+已在原任务服务持锁时，实际启动两个 stdio 客户端，均完成初始化、7工具发现与 health。此前当前对话缺少原生入口，且设置没有重载/开关；用户于 2026-10-04 在初始化修复后完全退出并打开 Codex.app。随后唯一一次原生 workbuddy_intelmac.health 成功，available、authenticated、supported 均为 true，WorkBuddy 5.6.2、协议6。旧版原生工具加载验收通过，发生在首次退出测试前；alpha.3 已在用户完全重启后通过一次原生 `health` 验收，正式版只更改版本与文档。任务操作仍由单个服务持有记录目录；未实现跨对话共享后台调度器，遇到冲突明确报告，不能将初始化修复称为多任务并发已实现。
 
 ## 与上游逐项对照
 
@@ -83,7 +83,7 @@ Deepseek-V4.1-Flash 与 GLM-5.3-Flash 均完成真实短任务、模型回显和
 
 依据：[上游调度与工具](https://github.com/gosick233-cloud/Codex-WorkBuddy-Desktop-Bridge/blob/c00a8e5eab809a97963277e71ec008abb3d372ae/workbuddy_bridge/server.py)、[ACP与模型](https://github.com/gosick233-cloud/Codex-WorkBuddy-Desktop-Bridge/blob/c00a8e5eab809a97963277e71ec008abb3d372ae/workbuddy_bridge/acp.py)、[历史登记](https://github.com/gosick233-cloud/Codex-WorkBuddy-Desktop-Bridge/blob/c00a8e5eab809a97963277e71ec008abb3d372ae/workbuddy_bridge/history.py)、[复审会话](https://github.com/gosick233-cloud/Codex-WorkBuddy-Desktop-Bridge/blob/c00a8e5eab809a97963277e71ec008abb3d372ae/workbuddy_bridge/review_sessions.py)、[路由Skill](https://github.com/gosick233-cloud/Codex-WorkBuddy-Desktop-Bridge/blob/c00a8e5eab809a97963277e71ec008abb3d372ae/.codex/skills/workbuddy-agent-routing/SKILL.md)。
 
-正式 v0.1.0 不要求机械复制所有上游能力，但必须完成并准确说明本项目的发布范围和验收门槛。当前不能声明三步全部完成或与上游能力完全等价。
+正式 v0.1.0 不要求机械复制所有上游能力，但必须完成并准确说明本项目的发布范围和验收门槛。三步发布状态以仓库 Issue 为准；本项目与上游能力并不完全等价，#5 桌面连接器仍单独开放。
 
 alpha.2 历史自动测试：115 项项目测试 + 34 项上游回归，共 149 项全部通过。包含模型/上下文回显、上限拒绝、幂等参数、初始化持锁、工具结果脱敏与原生文本包装回归。
 

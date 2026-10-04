@@ -1,8 +1,8 @@
 # Codex WorkBuddy Bridge · intelmac
 
-让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。旧暖启动任务的订阅扣减已核对，本轮冷启动新用量仍待用户确认。
+让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。旧暖启动任务已核对 2.26 积分；新冷启动路径从用户用量页核对 7 条、2.88 积分，其余已接受请求的消耗尚未确定。
 
-**v0.1.0-alpha.3：冷启动、权限、取消、故障及整个应用退出/重开真实验收通过。** 发布状态见仓库 Release；正式 v0.1.0 仍待 Codex 原生 MCP 加载更新代码、新用量核对及发布检查。安装说明见 [INSTALL](docs/INSTALL.md)。
+**v0.1.0：冷启动、权限、取消、故障及整个应用退出/重开真实验收通过。** Codex 原生 MCP 已在完全重启后确认加载同功能的 `0.1.0a3`；本版变更版本号和文档。发布状态见仓库 Release。安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
 
@@ -21,6 +21,7 @@
 - 文件允许一次、明确 Bash 命令允许一次、目录外 Bash 拒绝、流式取消通过，自有资源清理均确认。
 - 新路径的错误本机凭证、worker 失联和 MCP 服务强制结束/重启通过；中断任务 uncertain，不自动重发。
 - 整个 GUI 在流式输出及等待权限时正常退出/重开通过；权限等待解除、未授权文件未生成，旧请求幂等，新自有任务成功，清理确认。
+- 用户账号用量页显示新路径的 7 条记录共 2.88 积分，使用端为 WorkBuddy；剩余请求的用量未知。
 - 自动测试结果见 [测试报告](docs/TEST_REPORT.md)；[云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml) 的结果以对应提交的运行记录为准。
 
 只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据，目标桌面 MCP 尚未继承。详细范围和待办见 [验收与差距](docs/AUDIT.md)。
