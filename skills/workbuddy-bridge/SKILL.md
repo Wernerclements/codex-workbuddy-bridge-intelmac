@@ -9,7 +9,7 @@ description: Delegate a task from Codex to the existing WorkBuddy desktop applic
 
 ## 委派
 
-1. 调用 `health` 确认 WorkBuddy 连接和协议能力。不可用时说明诊断结果，不改用模型 API、不读取应用凭证。
+1. 调用只读 `health` 确认 WorkBuddy 状态。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示可以启动自有任务，认证尚未验证；不要求先有 sidecar。`available=false` 时说明诊断结果。不要自行读取应用凭证或改用模型 API。
 2. 将目标、所需输入、输出文件和完成标准写成清楚的任务说明。使用独立工作目录，避免与用户正在进行的会话或 Codex 当前修改相互影响。
 3. 调用 `start_task(prompt, cwd, request_id, model, context_tokens)`，为本次委派提供唯一、简短的 ASCII 标识，并保留返回的 `task_id`。响应丢失时使用同一标识和完全相同参数查询原记录；服务不会重新提交。不同任务使用不同标识。`cwd` 必须是已经存在的目录。首版串行执行一个任务。
 4. 用 `get_task(task_id)` 查询状态，或用 `wait_task(task_id, timeout_seconds)` 等待。单次等待最多 60 秒，给用户正常进度反馈。
@@ -24,11 +24,13 @@ description: Delegate a task from Codex to the existing WorkBuddy desktop applic
 
 ## 回收结果
 
-任务进入终态后调用 `get_result(task_id)`。读取 `answer_path` 指向的正文，核对 `status`、`artifacts` 文件清单、`partial` 及 `scan_limited`。长文本从结果文件读取，不仅依赖状态摘要。`partial=true` 表示正文或文件只保留了部分执行结果，必须说明尚未确认完整完成；扫描受限时，说明文件清单可能不完整。
+任务进入终态后调用 `get_result(task_id)`。读取 `answer_path` 指向的正文，核对 `status`、`artifacts` 文件清单、`partial`、`scan_limited`、`cleanup_pending` 和 `cleanup_confirmed`。长文本从结果文件读取，不仅依赖状态摘要。`partial=true` 表示正文或文件只保留了部分执行结果，必须说明尚未确认完整完成；扫描受限时，说明文件清单可能不完整。
+
+`uncertain` 表示执行结果未确认，不要自动重发；使用原 task_id 查询或使用完全相同 request_id 与参数取回记录。清理未确认时报告实际标记，不把任务终态当作资源清理已完成。应用更新后当前适配仅允许已验证的 5.6.2，不尝试绕过版本检查。
 
 核对实际产物和用户的完成标准。报告任务是成功、失败、取消还是结果不确定。保留任务 ID 和可点击的结果路径。模拟测试通过、健康检查通过或账号已认证，都不能作为真实任务完成的证据。
 
-首次验证订阅复用时，依据真实任务和 WorkBuddy 的账号、用量记录报告；未经核对，不声称已使用订阅额度或没有额外费用。
+首次验证订阅复用时，依据真实任务和 WorkBuddy 的账号、用量记录报告；未经核对，不声称已使用订阅额度或没有额外费用。旧暖启动任务用量确认不代替 alpha.3 新冷启动路径的新任务核对。
 
 ## 模型、上下文与工具边界
 

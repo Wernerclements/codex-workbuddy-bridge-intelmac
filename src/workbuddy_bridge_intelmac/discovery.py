@@ -189,7 +189,8 @@ def discover(*, for_write: bool = False) -> Desktop:
     if for_write and (info["version"] != SUPPORTED_VERSION or not info["intel_binary"]):
         raise WorkBuddyError("当前 WorkBuddy 版本或架构尚未通过真实任务验收；请先更新兼容适配")
     candidates: list[Desktop] = []
-    for path, pid in find_sockets():
+    sockets = find_sockets()
+    for path, pid in sockets:
         try:
             ping = rpc(path, "sidecar.ping") or {}
             protocol = int(ping.get("version", 0))
@@ -204,7 +205,9 @@ def discover(*, for_write: bool = False) -> Desktop:
                 captured = rpc(path, "session.capture", {"sessionId": host["sessionId"], "lines": 300}) or {}
                 match = re.search(r"[?&]password=([^\s\x00-\x1f&]+)", str(captured.get("text", "")))
                 password = unquote(match.group(1)) if match else ""
-                auth_status(endpoint, password)
+                status = auth_status(endpoint, password)
+                if status.get("auth_enabled") is not True or status.get("authenticated") is not True:
+                    continue
                 candidates.append(Desktop(path, pid, info["version"], protocol,
                                           str(host["sessionId"]), endpoint, password,
                                           str(host.get("runtimeId", ""))))
@@ -213,5 +216,6 @@ def discover(*, for_write: bool = False) -> Desktop:
     if len(candidates) > 1:
         raise WorkBuddyError("发现多个 WorkBuddy 桌面实例；请保留一个实例后重试")
     if not candidates:
-        raise WorkBuddyError("未发现可认证的 WorkBuddy 桌面通道；请启动应用并登录")
+        raise WorkBuddyError("未发现可认证的 WorkBuddy 桌面通道；请启动应用并登录",
+                            kind="unavailable" if sockets else "cold_start")
     return candidates[0]

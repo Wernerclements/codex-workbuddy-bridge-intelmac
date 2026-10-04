@@ -493,3 +493,148 @@ class ManagerTests(unittest.TestCase):
                 manager.start_task("test", str(self.cwd), context_tokens=context)
         self.assertEqual(manager._tasks, {})
         self.assertEqual(controller.instances, [])
+
+    def test_runtime_loss_unblocks_permission_without_grant_and_preserves_partial(self):
+        callbacks_holder = {}
+        choices = []
+
+        def behavior(instance, callbacks, prompt):
+            callbacks_holder.update(callbacks)
+            callbacks["on_event"]({"type": "answer", "text": "early partial"})
+            choices.append(callbacks["on_permission"]({"options": [{"optionId": "allow"}]}))
+            return {"answer": "late success", "stop_reason": "end_turn"}
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        waiting = manager.wait_task(task_id, 2)
+        self.assertEqual(waiting["status"], "permission_required")
+        request_id = waiting["permission_request"]["request_id"]
+        callbacks_holder["on_event"]({"type": "runtime_lost", "reason": "private-loss-detail"})
+        with self.assertRaises(ValueError):
+            manager.respond_permission(task_id, request_id, "allow")
+        ended = manager.wait_task(task_id, 2)
+        self.assertEqual(ended["status"], "uncertain")
+        self.assertTrue(ended["runtime_lost"])
+        self.assertFalse(ended["cancel_requested"])
+        self.assertIsNone(ended["permission_request"])
+        self.assertEqual(choices, [])
+        result = manager.get_result(task_id)
+        self.assertTrue(result["partial"])
+        self.assertEqual(Path(result["answer_path"]).read_text(), "early partial")
+        self.assertNotIn("private", result["error"])
+
+    def test_runtime_loss_before_normal_return_cannot_claim_success(self):
+        def behavior(instance, callbacks, prompt):
+            callbacks["on_event"]({"type": "runtime_lost"})
+            return {"answer": "late complete answer", "stop_reason": "end_turn"}
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        ended = manager.wait_task(task_id, 2)
+        self.assertEqual(ended["status"], "uncertain")
+        self.assertFalse(ended["cancel_requested"])
+        result = manager.get_result(task_id)
+        self.assertTrue(result["partial"])
+        self.assertEqual(Path(result["answer_path"]).read_text(), "late complete answer")
+
+    def test_runtime_loss_without_partial_is_still_uncertain(self):
+        def behavior(instance, callbacks, prompt):
+            callbacks["on_event"]({"type": "runtime_lost"})
+            raise ValueError("private unexpected exception")
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        ended = manager.wait_task(task_id, 2)
+        self.assertEqual(ended["status"], "uncertain")
+        self.assertFalse(ended["cancel_requested"])
+        self.assertFalse(manager.get_result(task_id)["partial"])
+
+    def test_verified_close_clears_pending_without_changing_success(self):
+        def behavior(instance, callbacks, prompt):
+            instance.close = lambda: {"cleaned": True}
+            return {"answer": "done", "stop_reason": "end_turn"}
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        self.assertEqual(manager.wait_task(task_id, 2)["status"], "succeeded")
+        manager.close()
+        result = manager.get_result(task_id)
+        self.assertTrue(result["cleanup_confirmed"])
+        self.assertFalse(result["cleanup_pending"])
+        recovered = []
+        restarted, unused = self.manager(recover=lambda runtime: recovered.append(runtime) or {"cleaned": True})
+        self.assertEqual(restarted.get_task(task_id)["status"], "succeeded")
+        self.assertEqual(recovered, [])
+
+    def test_failed_terminal_cleanup_is_recovered_on_restart_without_replay(self):
+        def behavior(instance, callbacks, prompt):
+            instance.close = lambda: {"cleaned": False}
+            raise ValueError("private execution failure")
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        self.assertEqual(manager.wait_task(task_id, 2)["status"], "failed")
+        manager.close()
+        before = manager.get_result(task_id)
+        self.assertTrue(before["cleanup_pending"])
+        self.assertFalse(before["cleanup_confirmed"])
+        recovered = []
+        restarted, unused = self.manager(recover=lambda runtime: recovered.append(runtime) or {"cleaned": True})
+        after = restarted.get_result(task_id)
+        self.assertEqual(after["status"], "failed")
+        self.assertEqual(after["error"], before["error"])
+        self.assertFalse(after["cleanup_pending"])
+        self.assertTrue(after["cleanup_confirmed"])
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(unused.instances, [])
+
+    def test_uncertain_close_exception_stays_pending_and_restart_preserves_partial(self):
+        def behavior(instance, callbacks, prompt):
+            def fail_close():
+                raise OSError("private cleanup detail")
+            instance.close = fail_close
+            callbacks["on_event"]({"type": "runtime_lost"})
+            return {"answer": "partial answer", "stop_reason": "end_turn"}
+
+        manager, controller = self.manager(Controller(behavior))
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        self.assertEqual(manager.wait_task(task_id, 2)["status"], "uncertain")
+        manager.close()
+        before = manager.get_result(task_id)
+        self.assertTrue(before["cleanup_pending"])
+        self.assertEqual(manager.get_task(task_id)["cleanup_error_type"], "OSError")
+        restarted, unused = self.manager(recover=lambda runtime: {"cleaned": True})
+        after = restarted.get_result(task_id)
+        self.assertEqual(after["status"], "uncertain")
+        self.assertEqual(after["summary"], before["summary"])
+        self.assertEqual(after["answer_path"], before["answer_path"])
+        self.assertTrue(after["cleanup_confirmed"])
+        self.assertFalse(after["cleanup_pending"])
+        self.assertEqual(unused.instances, [])
+
+    def test_legacy_close_none_never_claims_verified_cleanup(self):
+        manager, controller = self.manager()
+        controller.release.set()
+        task_id = manager.start_task("test", str(self.cwd))["task_id"]
+        manager.wait_task(task_id, 2)
+        manager.close()
+        result = manager.get_result(task_id)
+        self.assertTrue(result["cleanup_pending"])
+        self.assertFalse(result["cleanup_confirmed"])
+
+    def test_failed_restart_cleanup_remains_pending_and_preserves_terminal_status(self):
+        task_id = str(uuid.uuid4())
+        directory = self.root / "state" / task_id
+        directory.mkdir(parents=True)
+        (directory / "task.json").write_text(json.dumps({"task_id": task_id, "status": "cancelled",
+            "summary": "partial", "cleanup_pending": True, "runtime": {"worker_id": "own-worker"}}))
+        def failed_recovery(runtime):
+            raise PermissionError("private recovery detail")
+        manager, controller = self.manager(recover=failed_recovery)
+        task = manager.get_task(task_id)
+        self.assertEqual(task["status"], "cancelled")
+        self.assertTrue(task["cleanup_pending"])
+        self.assertFalse(task["cleanup_confirmed"])
+        self.assertEqual(task["cleanup_error_type"], "PermissionError")
+        self.assertNotIn("private", json.dumps(task))
+        self.assertEqual(controller.instances, [])

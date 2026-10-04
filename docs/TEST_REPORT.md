@@ -1,28 +1,64 @@
 # 测试报告
 
-日期：2026-10-04。环境：2019 MacBook Pro，Intel x86_64，macOS 26.5.1（25F80），16 GB 内存；WorkBuddy 5.6.2；Python 3.12.13。
+更新日期：2026-10-05（北京时间）。真实验收跨 10 月 4–5 日。环境：2019 MacBook Pro，Intel x86_64，macOS 26.5.1（25F80），16 GB 内存；WorkBuddy 5.6.2；Python 3.12.13。
 
 上游固定提交：`c00a8e5eab809a97963277e71ec008abb3d372ae`。
 
-## 当前发布验收结论
+## 当前验收结论：alpha.3 冷启动修复
 
-**2026-10-04：原生MCP加载通过，整应用退出恢复未通过，保持v0.1.0-alpha.2。** 以下早期章节保留各阶段的历史结果；最新状态以本节和文末实际退出记录为准。
+**2026-10-05：新冷启动、权限、取消、故障及整个 GUI 退出/重开真实矩阵通过。** 这是 `v0.1.0-alpha.3` 的验收范围，发布状态以仓库 Release 为准；正式 `v0.1.0` 尚未发布。独立 MCP 真实验收不替代 Codex 原生 MCP 加载更新代码，新路径用量仍需用户核对。本机自动与真实矩阵已满足 #2，随本次修复 PR 关闭；#3 保留原生加载、新用量及发布检查；#5 目标桌面 MCP 仍未继承。
 
-| 检查 | 结果 | 证据范围 |
+本轮自动测试：**232/232 通过（198 项项目测试 + 34 项上游回归），无跳过项**。下方 118、149、152 项均是早期阶段的历史数量。
+
+云端同一源码提交的 [PR 检查](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37230294661) 与 [分支检查](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37230270404) 均成功：Intel macOS 和 Ubuntu 各执行 198 项项目测试及 34 项上游回归，无跳过。
+
+### 新路径真实验收
+
+| 检查 | 结果 | 实际证明的范围 |
 | --- | --- | --- |
-| 修复后Codex原生health | 通过 | 唯一一次原生调用：available/authenticated/supported=true，WorkBuddy5.6.2、协议6 |
-| 整个WorkBuddy正常退出 | 通过 | 原GUI与sidecar身份均消失 |
-| 原模型任务状态 | uncertain | 服务器已接受prompt，退出中断请求，未报告成功 |
-| 原请求跨MCP进程重试 | 通过 | 同一任务、创建/开始时间和worker，记录数仍为1；无新模型请求 |
-| 应用重新打开 | 通过 | 启动命令成功，用户确认已登录正常主界面 |
-| 重开后的内部通道 | 失败 | 等待100秒没有可认证的sidecar/CLI Host |
-| 恢复后短任务 | 未执行 | 通道恢复前提不成立 |
-| 测试worker清理 | 已确认旧进程消失 | 旧sidecar也已退出；cleanup=false是旧通道不存在的返回，非遗留证据 |
+| Deepseek-V4.1-Flash 冷启动短任务 | 通过 | 指定模型确认、end_turn、1m 会话预算；等待超时保留原任务；清理确认 |
+| GLM-5.3-Flash 冷启动短任务 | 通过 | 指定模型确认、end_turn、1m 会话预算；等待超时保留原任务；清理确认 |
+| 文件允许一次 | 通过 | Write 请求经 allow_once 后文件生成且回收；清理确认 |
+| 明确 Bash 命令允许一次 | 通过 | 内联产品配置投影后，实际 Bash 经 allow_once 正常执行、end_turn；清理确认 |
+| 目录外 Bash 拒绝 | 通过 | 明确 reject_once，目录外文件未创建；任务取消并清理确认 |
+| 流式取消 | 通过 | 正文开始后取消，保留部分结果，状态 cancelled；清理确认 |
+| 错误本机凭证 | 通过 | 本项目独立运行时拒绝故意错误凭证，无模型生成请求 |
+| worker 失联 | 通过 | 原任务 uncertain，桌面仍可用；清理确认 |
+| MCP 服务 SIGKILL / 重启 | 通过 | 读取原记录并恢复清理，原任务 uncertain，不重新提交；清理确认 |
+| 权限等待时整个 GUI 退出 | 通过 | uncertain、部分结果保留、权限等待解除、未授权文件不存在；幂等和清理确认 |
+| 整 GUI 正常退出 | 通过 | 初始无 sidecar；正常退出唯一桌面主进程，未强杀非自有进程 |
+| 已接受任务中断 | 通过 | GUI 退出后 uncertain、cleanup_confirmed=true；同一 request_id 返回原记录，不重发 |
+| 重开 GUI 后新任务 | 通过 | GUI 重新就绪；新的 owned 运行时成功短任务后才确认认证，清理确认 |
+| 恢复后请求幂等 | 通过 | 原任务及新短任务分别复用相同 request_id，均返回原记录 |
+| 最终清理 | 通过 | 两个本项目 worker 清理均确认，应用尽力重开流程成功 |
 
-完整退出恢复验收失败，#2/#3仍开放，不发布正式v0.1.0。
+双模型新短任务的 `usage.context_size` 均为 1,000,000，实际 used 分别为 30,003 和 28,518；这是会话预算与短任务测试，不是百万 token 满载或长输入质量测试。文件、权限和取消使用默认 300k 预算。新报告存于本机忽略目录 `.local/cold-start/deepseek-ready`、`glm-protected`、`tools-protected`、`bash-snapshot`、`faults-protected`；不提交原始报告、正文或任务/会话/账号标识。
 
+### 本轮用量待核对
 
-## 执行结果
+本机自有记录确认本轮共有 13 条 prompt 被执行通道接受：DeepSeek 12 条、GLM 1 条。其中一条是北京时间 23:13 的早期 `Authentication required` 请求；其余 12 条在 10 月 4 日 23:41 至 10 月 5 日 00:00 用于成功、权限、取消和故障验收。接受请求不等于已产生计费，取消或中断也不能推断为零消耗；最终积分、模型标签及账号归属以用户用量页为准。六条早期启动/目录故障记录未到 prompt 接受阶段。本轮核对与旧四次 2.26 积分、17:11 用量未知分别保留。
+
+### 冷启动与认证修复的证据边界
+
+开始时只读 health 为 `ready_for_task=true`、`runtime_ready=false`，认证尚未验证；诊断不启动 worker。任务启动后使用应用内置运行时创建本项目自有 worker，不要求桌面先创建 sidecar。原生字段经临时私有 Unix socket 握手，使用应用现有密钥辅助函数且 `createIfMissing=false`；不读取裸 token、不关闭静态加密、不导出凭证、不重写账号。
+
+早期 standalone 短请求返回 `Authentication required`，外层 stopReason 为 refusal；这是认证问题，不能据此称内容被安全策略拒绝。另一些早期模型目录失败发生在 prompt 提交之前，没有创建模型生成任务。随后补齐原生受保护字段及应用产品元数据，初始化后再选择模型，双模型真实短任务成功。应用产品缓存路径仍可能晚于初始模型/工具快照解析，进一步由原生 launcher 在 CLI 初始化前只读加载现有缓存，内联投影到该自有进程环境；明确 Bash allow_once 的补充任务通过，不改写用户缓存。模型任务成功与用户页面积分核对是两项证据；本轮新路径的用量归属和扣减待用户确认，不能沿用旧四次任务的 2.26 积分结论。
+
+### 本轮完整 GUI 退出/重开与故障
+
+2026-10-04 北京时间 **23:46:22–23:46:49** 运行退出恢复验收，初始 GUI 主进程唯一且没有 sidecar。服务器接受 prompt 后正常退出 WorkBuddy；原任务进入 uncertain，资源清理确认。独立 MCP 重试原 request_id 返回原记录，没有模型重发。正常重开后，先确认 GUI 存在与 ready_for_task，再由新的自有 worker 完成短任务；此时才记录认证成功。原任务、新短任务的幂等和清理均通过，脚本整体 passed=true。
+
+2026-10-04 北京时间 23:52:48–23:53:09，明确 Bash allow_once 补充验收通过。23:54:26–23:54:38，新自有路径的故意错误本机凭证、worker 失联及 MCP 服务 SIGKILL/重启均通过；后两者 uncertain，桌面保持可用，资源清理确认。没有将新的故障结果套用旧暖启动实现。
+
+2026-10-05 北京时间 **00:00:08–00:00:40**，在权限等待期间正常退出整个 GUI；原任务 uncertain、partial=true、权限等待解除、申请写入的测试文件不存在。同一 request_id 返回原记录，清理确认。重开后新的自有短任务成功，幂等及清理确认；两个自有 worker 清理均确认，整体 passed=true。最新 `.local/live-desktop-restart/report.json` 对应这次权限等待验收，23:46 的验收保存在同目录的独立运行子目录。
+
+本轮脚本使用只读 health 探测，不调用 MCP health 工具。退出通过正常应用命令，不强杀非自有 GUI/sidecar；finally 仅清理自有 worker 并尽力重开应用。报告保存在忽略的 `.local/live-desktop-restart`。旧 17:11 失败记录留在下方历史章节，不再代表当前能力。
+
+## 历史记录阅读说明
+
+以下按开发阶段保留移植基线、alpha.1、alpha.2 和首次退出失败证据。提及“当前”“最终”或未执行场景时，均指该小节所在的历史阶段；最新支持范围以上方 alpha.3 结论为准。
+
+## 移植基线执行结果（历史）
 
 | 检查 | 结果 | 实际证明的范围 |
 | --- | --- | --- |
@@ -54,14 +90,14 @@
 
 以上是实现前的测试边界。后续已完成的真实验收见下方补充；原版真实测试失败保留为移植证据，订阅额度核对结果见文末补充。
 
-## 自动测试
+## alpha.1 自动测试（历史）
 
 GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、检查依赖、验证上游哈希并执行 34 项上游回归与 84 项项目测试。云端不安装或登录 WorkBuddy，因此不能替代本机端到端验收。具体运行结果以 GitHub Actions 记录为准。
 
 首轮 [Actions 运行 37148089345](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37148089345) 已完成，总结为 `success`，两项作业均成功。对应代码提交 `b330459d7ba8fd6a777f95077efacf39017cfa57`。Intel 云端同样从源码构建了 `cryptography`，进一步确认正式安装方案需要处理这个依赖。
 
 
-## 实现与本机验收补充
+## alpha.1 实现与本机验收补充（历史）
 
 版本：`v0.1.0-alpha.1`。项目单元与模拟协议测试 **84/84 通过**，上游回归 **34/34 通过**，共 **118 项**。项目测试包含控制流广播、权限、停止原因、串行队列、取消、恢复、配置安装及文件扫描错误处理。
 
@@ -98,7 +134,7 @@ GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、�
 
 最新实现提交 `aab3c13f63621036a9165918aa33a197a16b4e6e` 的 [Actions 运行 37151698086](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37151698086) 已成功：Intel macOS 与 Ubuntu 各自执行全部 118 项测试，均通过。云端结果与本机真实验收分开记录。
 
-## alpha.2 双模型与工具继承复核
+## alpha.2 双模型与工具继承复核（历史）
 
 2026-10-04 北京时间 16:07:44–16:08:45：通过实际 MCP stdio 分别执行 Deepseek-V4.1-Flash 与 GLM-5.3-Flash 短任务。两者模型选择回显准确；context_window 选项为 300k/600k/1m，切换 1m 后 usage_update.size=1000000。最后一次用量事件分别 used=35612 和 36278，不是百万 token 满载测试。未配置独立模型 API，实际账号模型标签和积分已由用户用量页交叉核对，见文末。
 
@@ -114,7 +150,7 @@ GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、�
 
 工具证据格式在补充测试中先返回unknown，随后精确定位本次测试自己的CLI历史，确认原生输出为typed text并修复解析，无新增模型请求。真实解析证明Skill目录为 ~/.workbuddy/skills/find-skills；ToolSearch的1个候选为 mcp__sheetagent__search_data，四个目标均不匹配。历史读取范围仅该测试自身会话，原始正文不上传。
 
-## 主力模型订阅用量确认
+## 暖启动主力模型订阅用量确认（历史）
 
 用户于 2026-10-04 提供应用用量页记录并确认消耗正常。时间按北京时间：
 
@@ -127,20 +163,20 @@ GitHub Actions 配置 Ubuntu 和 Intel macOS 双环境，安装固定依赖、�
 
 DeepSeek 合计 1.72 积分，GLM 合计 0.54，总计 2.26。四项记录的使用端均为 CLI，与桥接器调用桌面应用内置运行时的架构一致。结合用户此前确认归属当前登录账号、无额外计费提示，两种主力模型的账号订阅复用通过；这不代表目标桌面 MCP 已经可用。未上传完整请求、账号标识或会话 ID。
 
-## 退出恢复验收准备
+## alpha.2 退出恢复验收准备（历史）
 
-用户确认 WorkBuddy 没有需要保留运行的任务，已授权正常退出与重开验收；随后选择先完成无需原生 MCP 的准备工作。新增 scripts/live_desktop_restart.py，默认只预览，--run 才发模型任务、正常退出与重开应用。脚本不调用 health，不强杀 GUI/sidecar，分别核对原 GUI 与 sidecar 是否退出，保留原任务真实终态，并验证相同 request_id 返回原记录。恢复后执行短文本任务；finally 尽力重开应用，仅清理自有 worker。
+用户确认 WorkBuddy 没有需要保留运行的任务，已授权正常退出与重开验收；随后选择先完成无需原生 MCP 的准备工作。新增 scripts/live_desktop_restart.py，默认只预览，--run 才发模型任务、正常退出与重开应用。该准备版本不调用 health，不强杀 GUI/sidecar，分别核对原 GUI 与 sidecar 是否退出，保留原任务真实终态，并验证相同 request_id 返回原记录。恢复后执行短文本任务；finally 尽力重开应用，仅清理自有 worker。
 
 本轮已通过默认预览和自动回归：118 项项目测试、34 项上游回归，共 152 项。新增回归验证默认预览不触发应用/模型操作、权限请求只取消不自动授权，以及幂等验收会识别任务被重新启动。脚本尚未真实运行，整应用退出不能记为通过；#2 继续开放。
 
 准备阶段尚未调用 Codex 原生 workbuddy_intelmac.health；当时没有工具或重载入口。此后用户完全重启 Codex，原生 health 已通过；最新退出恢复结果见本报告当前结论及下方记录。
 
-## 整应用退出真实验收与冷启动缺口
+## 17:11 首次整应用退出与冷启动缺口（历史失败）
 
 北京时间2026-10-04 17:11:04–17:12:56执行 scripts/live_desktop_restart.py --run。退出前已确认模型prompt被接受，随后正常退出WorkBuddy；旧GUI/sidecar消失，原任务uncertain。重新打开后100秒未找到认证执行通道，脚本最终passed=false、stage=reopen_and_authenticate、error_type=ExceptionGroup；不将外层异常包装误解为已知认证失败。
 
-后续只读源码/日志检查及用户界面确认表明：应用正常登录且daemon初始化完成，sidecar与legacy CLI Host按需启动，重开后没有执行其启动流程。当前桥接器不会激活冷启动通道。新短任务没有提交，本次只有一条DeepSeek中断请求，其具体积分尚未核对。
+后续只读源码/日志检查及用户界面确认表明：应用正常登录且daemon初始化完成，sidecar与legacy CLI Host按需启动，重开后没有执行其启动流程。当时的 alpha.2 桥接器不会激活冷启动通道。新短任务没有提交，本次只有一条 DeepSeek 中断请求；用户用量页未见该次明细，具体积分未知。
 
 在独立MCP进程内，以同一request_id重试原测试任务，返回原uncertain记录；任务/时间/worker身份保持一致，记录数仍为1，没有新模型请求。旧worker进程已经消失。测试结束时应用正常重开；原始报告及补充身份检查保存在忽略的.local/live-desktop-restart，不上传请求正文、会话ID或凭证。
 
-本次测试不调用health；原生health成功证据来自用户完全重启后的前一轮唯一一次调用。
+17:11 的测试版本不调用 health；旧版原生 health 成功证据来自用户完全重启后的前一轮唯一一次调用，不能替代 alpha.3 代码加载验收。
