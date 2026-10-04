@@ -9,6 +9,7 @@ import httpx
 
 from .discovery import HEADERS, WorkBuddyError, check_endpoint
 from . import __version__
+from .tool_evidence import extract_tool_evidence
 
 
 def sse_messages(response):
@@ -55,6 +56,7 @@ class AcpClient:
         self._connection_id = ""
         self._session_token = ""
         self.session_id = ""
+        self.session_capabilities: dict = {}
         self.on_event = on_event
         self.on_permission = on_permission
         self._http = httpx.Client(trust_env=False, follow_redirects=False,
@@ -67,6 +69,7 @@ class AcpClient:
         self._listener_error: str | None = None
         self._permission_lock = threading.Lock()
         self._permission_ids: set[str] = set()
+        self._tool_names: dict[str, str] = {}
         self.answer: list[str] = []
         self.stop_reason = ""
 
@@ -99,7 +102,57 @@ class AcpClient:
         if not isinstance(result, dict) or not result.get("sessionId"):
             raise WorkBuddyError("WorkBuddy 未返回任务会话 ID")
         self.session_id = str(result["sessionId"])
+        self.session_capabilities = {key: result[key] for key in ("models", "configOptions") if key in result}
         return self.session_id
+
+    def select_model(self, model: str) -> dict:
+        """Select an advertised model and verify its echoed session value before prompting."""
+        models = (self.session_capabilities.get("models") or {}).get("availableModels", [])
+        chosen = next((item for item in models if item.get("modelId") == model), None)
+        if chosen is None:
+            raise WorkBuddyError("指定模型未在 WorkBuddy 当前账号的可用模型中；任务未发送")
+        result = self.request("session/set_config_option", {
+            "sessionId": self.session_id, "configId": "model", "value": model})
+        options = (result or {}).get("configOptions", []) if isinstance(result, dict) else []
+        current = next((item.get("currentValue") for item in options if item.get("id") == "model"), None)
+        if current != model:
+            raise WorkBuddyError("WorkBuddy 未确认所选模型；任务未发送，未回退到默认模型")
+        self.session_capabilities["configOptions"] = options
+        metadata = chosen.get("_meta") or {}
+        limit = metadata.get("maxInputTokens")
+        return {"id": model, "name": str(chosen.get("name", model)),
+                "max_input_tokens": limit if type(limit) is int and limit > 0 else None,
+                "selection_confirmed": True}
+
+    def select_context(self, tokens: int | None, model_info: dict) -> dict:
+        """Change an advertised session budget; never manufacture a larger model limit."""
+        option = next((item for item in self.session_capabilities.get("configOptions", [])
+                       if item.get("id") == "context_window"), None)
+        choices = [int(item["value"]) for item in (option or {}).get("options", [])
+                   if str(item.get("value", "")).isdigit()]
+        limit = model_info.get("max_input_tokens")
+        current = (option or {}).get("currentValue")
+        budget = int(current) if str(current).isdigit() else limit
+        if tokens is not None:
+            if limit is None or tokens > limit:
+                raise WorkBuddyError("请求的上下文长度超过模型宣告上限或上限未知；任务未发送")
+            if choices:
+                if tokens not in choices:
+                    raise WorkBuddyError("请求的上下文长度不是该模型支持的会话选项；任务未发送")
+                result = self.request("session/set_config_option", {
+                    "sessionId": self.session_id, "configId": "context_window", "value": str(tokens)})
+                updated = next((item.get("currentValue") for item in (result or {}).get("configOptions", [])
+                                if item.get("id") == "context_window"), None)
+                if str(updated) != str(tokens):
+                    raise WorkBuddyError("WorkBuddy 未确认上下文设置；任务未发送")
+                budget = tokens
+            elif tokens != limit:
+                raise WorkBuddyError("该模型未提供上下文长度切换选项；任务未发送")
+            else:
+                budget = limit
+        return {"context_tokens": budget, "context_choices": choices,
+                "context_source": "session_option" if option else "advertised_model_limit",
+                "context_requested": tokens}
 
     def start_listener(self) -> None:
         def listen():
@@ -142,9 +195,42 @@ class AcpClient:
                 self.answer.append(text)
                 self.on_event({"type": "answer", "text": text})
         elif kind == "tool_call" or kind == "tool_call_update":
-            self.on_event({"type": "activity", "kind": kind,
+            if kind == "tool_call_update" and not update.get("status"):
+                return
+            tool_name = str((update.get("_meta") or {}).get("codebuddy.ai/toolName", ""))
+            tool_id = str(update.get("toolCallId", ""))[:200]
+            if tool_id and tool_name:
+                if len(self._tool_names) >= 500:
+                    self._tool_names.clear()
+                self._tool_names[tool_id] = tool_name
+            elif tool_id:
+                tool_name = self._tool_names.get(tool_id, "")
+            raw = update.get("rawInput") or {}
+            skill = raw.get("skill", "") if isinstance(raw, dict) and tool_name == "Skill" else ""
+            activity = {"type": "activity", "kind": kind,
                            "title": str(update.get("title", ""))[:300],
-                           "status": str(update.get("status", ""))})
+                           "tool_name": tool_name[:200], "skill_name": str(skill)[:200],
+                           "status": str(update.get("status", ""))[:100]}
+            if activity["status"] in {"completed", "failed"}:
+                output = update.get("rawOutput")
+                if output is None:
+                    output = {"content": "\n".join(str((item.get("content") or {}).get("text", ""))
+                              for item in update.get("content", []) if isinstance(item, dict))}
+                evidence = extract_tool_evidence(tool_name, output)
+                if evidence:
+                    activity["evidence"] = evidence
+            self.on_event(activity)
+        elif kind == "usage_update":
+            used, size = update.get("used"), update.get("size")
+            if type(used) is int and used >= 0 and type(size) is int and size > 0:
+                self.on_event({"type": "usage", "used": used, "context_size": size})
+        elif kind == "available_commands_update":
+            skills = [{"name": str(item.get("name", ""))[:200],
+                       "source": str((item.get("_meta") or {}).get("source", ""))[:100],
+                       "is_built_in": bool((item.get("_meta") or {}).get("isBuiltIn", False))}
+                      for item in update.get("availableCommands", [])
+                      if (item.get("_meta") or {}).get("type") == "skill"]
+            self.on_event({"type": "available_skills", "skills": skills[:500]})
 
     def _permission(self, event: dict) -> None:
         key = str(event["id"])

@@ -67,7 +67,8 @@ def recover_runtime(runtime: dict) -> dict:
 
 
 class WorkBuddyAdapter:
-    def __init__(self, task_id: str, cwd: str, on_event, on_permission):
+    def __init__(self, task_id: str, cwd: str, on_event, on_permission,
+                 model: str = "deepseek-v4.1-flash", context_tokens: int | None = None):
         try:
             valid_id = str(uuid.UUID(task_id)) == task_id or uuid.UUID(task_id).hex == task_id
         except ValueError:
@@ -75,6 +76,8 @@ class WorkBuddyAdapter:
         if not valid_id:
             raise WorkBuddyError("任务 ID 必须是桥接器生成的唯一 ID")
         self.task_id = task_id
+        self.model = model
+        self.context_tokens = context_tokens
         self.cwd = str(Path(cwd).resolve())
         self.on_event, self.on_permission = on_event, on_permission
         self.runtime: dict = {}
@@ -94,10 +97,16 @@ class WorkBuddyAdapter:
                         "socket_path": str(desktop.socket_path), "sidecar_pid": desktop.sidecar_pid,
                         "version": desktop.version}
         self.on_event({"type": "runtime", "runtime": dict(self.runtime)})
+        worker_args = [str(info["cli"]), "--serve", "--setting-sources", "user",
+                       "--model", self.model,
+                       "--permission-mode", "default", "--permission-mode-before-plan", "default"]
+        if self.context_tokens is not None:
+            # This controls compaction in this worker only. It does not increase
+            # the advertised model budget, which is checked before prompting.
+            worker_args += ["--autocompact", str(self.context_tokens)]
         created = rpc(desktop.socket_path, "session.create", {
             "sessionId": worker, "command": str(info["executable"]),
-            "args": [str(info["cli"]), "--serve", "--setting-sources", "user",
-                     "--permission-mode", "default", "--permission-mode-before-plan", "default"],
+            "args": worker_args,
             "cwd": self.cwd, "port": 0,
             "env": {"ELECTRON_RUN_AS_NODE": "1", "CODEBUDDY_DISABLE_IDE": "1",
                     "CODEBUDDY_FORCE_LITE_WB_BUNDLE": "1",
@@ -136,6 +145,10 @@ class WorkBuddyAdapter:
         # Strictly use the known safe mode; unknown modes can normalize to bypass.
         self.client.request("session/set_config_option", {
             "sessionId": session_id, "configId": "mode", "value": "default"})
+        selected = self.client.select_model(self.model)
+        selected.update(self.client.select_context(self.context_tokens, selected))
+        selected["auto_compact_window_requested"] = self.context_tokens
+        self.on_event({"type": "model", "model": selected})
         self.on_event({"type": "running"})
         scoped = (f"你正在执行由 Codex 委派的独立任务。工作目录：{self.cwd}\n"
                   "需要生成文件时放在这个目录中；涉及其他目录或敏感操作时保留权限请求。"

@@ -2,7 +2,7 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与登录配置；订阅用量由用户核对。
 
-**开发版 v0.1.0-alpha.1：已完成本机安装与主要端到端验收，订阅用量待用户核对。** 安装说明见 [INSTALL](docs/INSTALL.md)。
+**开发版 v0.1.0-alpha.2：已完成本机安装与主要端到端验收，指定模型用量及界面加载仍待核对。** 安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
 
@@ -19,13 +19,14 @@
 - 本机 macOS 26.5.1 / x86_64，WorkBuddy 5.6.2 的 Intel 可执行文件存在。
 - 可只读发现运行中的 sidecar，读取协议版本 6、会话信息及本机认证状态。
 - 上游完整单元测试：原样 30/31 通过；路径兼容补丁后，加上 3 项回归测试，34/34 通过。
-- [云端测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/37151698086)：Intel macOS 和 Ubuntu 均为 118/118 通过（84 项项目测试 + 34 项上游回归）。
+- [云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml)：Intel macOS 和 Ubuntu 执行完整项目与上游回归；当前本机 149/149 通过（115 项项目测试 + 34 项上游回归），云端以运行记录为准。
 - 原版真实任务测试停在 Windows 实例发现逻辑，尚未向模型发送任务。
 
-开发版已通过真实 MCP 文本、文件回收、等待超时、执行中取消、权限拒绝、错误凭证、worker 失联和桥接器重启验收。84 项项目测试与 34 项上游回归全部通过。订阅计费仍待用户核对；桌面界面重新加载后的显示也须本机确认。
+开发版已通过真实 MCP 文本、文件回收、等待超时、执行中取消、权限拒绝、错误凭证、worker 失联和桥接器重启验收。本轮新增双模型选择与 1m 上下文预算，实际任务通过；现有用户 Skill 可加载，桌面目标 MCP 仍未继承。详细证据、三项待办的严格状态和上游差距见 [验收与差距](docs/AUDIT.md)。
 
 ## 文档
 
+- [验收与差距](docs/AUDIT.md)：模型、上下文、工具继承和上游能力对照。
 - [移植计划](docs/PLAN.md)：范围、步骤和验收条件。
 - [测试报告](docs/TEST_REPORT.md)：成功、失败及待验证项。
 - [版本兼容](docs/COMPATIBILITY.md)：哪些环境实际测过。
@@ -40,7 +41,7 @@ python3 scripts/install.py
 
 Intel 原生依赖缺少预编译包时，在已有编译工具的环境中使用 `--allow-source-build`。安装器备份并合并 Codex 配置，详见 [安装说明](docs/INSTALL.md)。首次安装后重新加载 Codex MCP 或重启应用。
 
-MCP 提供 `start_task`、`get_task`、`wait_task`、`cancel_task`、`get_result`、`health` 与 `respond_permission`。结果完整正文落盘，工具返回摘要与文件路径。
+MCP 提供 `start_task`、`get_task`、`wait_task`、`cancel_task`、`get_result`、`health` 与 `respond_permission`。结果完整正文落盘，工具返回摘要与文件路径。`start_task` 可指定 `model` 和 `context_tokens`，默认模型为 `deepseek-v4.1-flash`；另一个主力模型为 `glm-5.3-flash`。指定 `context_tokens=1000000` 可选择已验证的 1m 会话预算。
 
 ## 重现测试
 

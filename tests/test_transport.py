@@ -233,6 +233,134 @@ class TransportTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC-PRIVATE-VALUE", str(caught.exception))
         self.assertNotIn("SYNTHETIC-TOKEN", str(caught.exception))
 
+    def test_usage_preserves_integer_budget_without_cost_or_private_metadata(self):
+        def usage(used, size):
+            return {"method": "session/update", "params": {
+                "sessionId": "own-session", "update": {"sessionUpdate": "usage_update",
+                "used": used, "size": size, "cost": {"amount": 999, "currency": "PRIVATE"},
+                "_meta": {"token": "SYNTHETIC-PRIVATE-CREDENTIAL", "usage": {"secret": "PRIVATE"}}}}}
+        self.client._event(usage(123, 1000000))
+        self.client._event(usage(0, 300000))
+        self.assertEqual(self.events, [{"type": "usage", "used": 123, "context_size": 1000000},
+                                       {"type": "usage", "used": 0, "context_size": 300000}])
+        for used, size in ((True, 1000000), (123, True), (-1, 1000000),
+                           (123, 0), (123.0, 1000000), (123, "1000000")):
+            self.client._event(usage(used, size))
+        self.assertEqual(len(self.events), 2)
+        self.assertNotIn("PRIVATE", repr(self.events))
+        self.assertNotIn("cost", repr(self.events))
+
+    def test_tool_input_fragments_are_ignored_and_skill_activity_is_sanitized(self):
+        def tool(update):
+            return {"method": "session/update", "params": {
+                "sessionId": "own-session", "update": update}}
+        for fragment in ("part one", "part two", "part three"):
+            self.client._event(tool({"sessionUpdate": "tool_call_update", "toolCallId": "synthetic-tool",
+                                     "rawInput": {"arguments": fragment}}))
+        self.assertEqual(self.events, [])
+        self.client._event(tool({"sessionUpdate": "tool_call", "toolCallId": "synthetic-tool",
+                                "title": "Load requested skill", "status": "pending",
+                                "_meta": {"codebuddy.ai/toolName": "Skill", "token": "PRIVATE"},
+                                "rawInput": {"skill": "bridge-test-skill", "credential": "PRIVATE",
+                                             "arguments": "SYNTHETIC-PRIVATE-INPUT"}}))
+        self.assertEqual(self.events, [{"type": "activity", "kind": "tool_call",
+                                       "title": "Load requested skill", "tool_name": "Skill",
+                                       "skill_name": "bridge-test-skill", "status": "pending"}])
+        self.assertNotIn("PRIVATE", repr(self.events))
+        self.assertNotIn("rawInput", repr(self.events))
+
+    def test_completion_without_metadata_uses_call_identity_and_only_safe_evidence(self):
+        def event(update):
+            return {"method": "session/update", "params": {
+                "sessionId": "own-session", "update": update}}
+        self.client._event(event({"sessionUpdate": "tool_call", "toolCallId": "search-1",
+            "status": "pending", "_meta": {"codebuddy.ai/toolName": "ToolSearch"}}))
+        self.client._event(event({"sessionUpdate": "tool_call_update", "toolCallId": "search-1",
+            "status": "completed", "rawOutput": {"type": "text", "text":
+                "Found 1 tool(s). Use DeferExecuteTool to invoke them.\n\n"
+                "## mcp__example__lookup\nPRIVATE credential and tool parameters"}}))
+        self.assertEqual(self.events[-1]["tool_name"], "ToolSearch")
+        self.assertEqual(self.events[-1]["evidence"], {"outcome": "found", "count": 1,
+                         "tool_names": ["mcp__example__lookup"]})
+        self.assertNotIn("PRIVATE", repr(self.events))
+
+    def model_capabilities(self, current="deepseek-v4.1-flash", *, context=True):
+        options = [{"id": "model", "currentValue": current,
+                    "options": [{"value": "deepseek-v4.1-flash"}, {"value": "glm-5.3-flash"}]}]
+        if context:
+            options.append({"id": "context_window", "currentValue": "300000",
+                            "options": [{"value": str(value)} for value in (300000, 600000, 1000000)]})
+        return {"models": {"currentModelId": current, "availableModels": [
+            {"modelId": model, "name": model, "_meta": {"maxInputTokens": 1000000}}
+            for model in ("deepseek-v4.1-flash", "glm-5.3-flash")]}, "configOptions": options}
+
+    def test_model_missing_from_advertised_catalog_is_rejected_before_request(self):
+        self.client.session_capabilities = self.model_capabilities()
+        self.client.request = Mock()
+        with self.assertRaises(WorkBuddyError):
+            self.client.select_model("invented-model")
+        self.client.request.assert_not_called()
+
+    def test_model_echo_mismatch_does_not_fallback_or_mark_selection_confirmed(self):
+        self.client.session_capabilities = self.model_capabilities()
+        self.client.request = Mock(return_value={"configOptions": [
+            {"id": "model", "currentValue": "hy4-preview"}]})
+        with self.assertRaises(WorkBuddyError):
+            self.client.select_model("glm-5.3-flash")
+        self.client.request.assert_called_once_with("session/set_config_option", {
+            "sessionId": "own-session", "configId": "model", "value": "glm-5.3-flash"})
+
+    def test_selected_model_refreshes_context_options_from_confirmed_response(self):
+        self.client.session_capabilities = self.model_capabilities(context=False)
+        response = self.model_capabilities(current="glm-5.3-flash")["configOptions"]
+        self.client.request = Mock(return_value={"configOptions": response})
+        result = self.client.select_model("glm-5.3-flash")
+        self.assertEqual(result, {"id": "glm-5.3-flash", "name": "glm-5.3-flash",
+                                  "max_input_tokens": 1000000, "selection_confirmed": True})
+        self.assertEqual(self.client.session_capabilities["configOptions"], response)
+        self.assertEqual(self.client.select_context(None, result)["context_tokens"], 300000)
+
+    def test_context_300k_to_1m_requires_string_option_echo(self):
+        self.client.session_capabilities = self.model_capabilities()
+        result_options = self.model_capabilities()["configOptions"]
+        result_options[1]["currentValue"] = "1000000"
+        self.client.request = Mock(return_value={"configOptions": result_options})
+        result = self.client.select_context(1000000, {"max_input_tokens": 1000000})
+        self.assertEqual(result["context_tokens"], 1000000)
+        self.assertEqual(result["context_choices"], [300000, 600000, 1000000])
+        self.assertEqual(result["context_source"], "session_option")
+        self.client.request.assert_called_once_with("session/set_config_option", {
+            "sessionId": "own-session", "configId": "context_window", "value": "1000000"})
+
+    def test_context_above_limit_or_not_supported_is_rejected_without_request(self):
+        self.client.session_capabilities = self.model_capabilities()
+        self.client.request = Mock()
+        for requested in (1000001, 500000):
+            with self.subTest(requested=requested), self.assertRaises(WorkBuddyError):
+                self.client.select_context(requested, {"max_input_tokens": 1000000})
+        self.client.request.assert_not_called()
+
+    def test_context_echo_mismatch_is_rejected(self):
+        self.client.session_capabilities = self.model_capabilities()
+        self.client.request = Mock(return_value={"configOptions":
+                                                 self.model_capabilities()["configOptions"]})
+        with self.assertRaises(WorkBuddyError):
+            self.client.select_context(1000000, {"max_input_tokens": 1000000})
+        self.client.request.assert_called_once()
+
+    def test_context_without_switch_option_accepts_only_advertised_limit(self):
+        self.client.session_capabilities = self.model_capabilities(context=False)
+        self.client.request = Mock()
+        for requested in (None, 1000000):
+            with self.subTest(requested=requested):
+                result = self.client.select_context(requested, {"max_input_tokens": 1000000})
+                self.assertEqual(result["context_tokens"], 1000000)
+                self.assertEqual(result["context_source"], "advertised_model_limit")
+        for requested, limit in ((300000, 1000000), (1000000, None)):
+            with self.subTest(requested=requested, limit=limit), self.assertRaises(WorkBuddyError):
+                self.client.select_context(requested, {"max_input_tokens": limit})
+        self.client.request.assert_not_called()
+
     def test_sse_ignores_heartbeats_and_rejects_invalid_json(self):
         response = Mock()
         response.iter_lines.return_value = iter([": heartbeat", "", 'data: {"id":1,"result":{}}', ""])

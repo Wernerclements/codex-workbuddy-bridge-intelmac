@@ -90,6 +90,8 @@ class RecoveryTests(unittest.TestCase):
     def test_adapter_accepts_manager_uuid_and_rejects_arbitrary_worker_id(self):
         instance = adapter.WorkBuddyAdapter(self.task, "/tmp", lambda event: None, lambda request: "deny")
         self.assertEqual(instance.task_id, self.task)
+        self.assertEqual(instance.model, "deepseek-v4.1-flash")
+        self.assertIsNone(instance.context_tokens)
         with self.assertRaises(WorkBuddyError):
             adapter.WorkBuddyAdapter("another-desktop-session", "/tmp", lambda event: None,
                                      lambda request: "deny")
@@ -102,9 +104,15 @@ class RecoveryTests(unittest.TestCase):
                 "cli_entry_present": True}
         events = []
         human_permission = Mock(return_value="deny")
-        instance = adapter.WorkBuddyAdapter(self.task, "/tmp", events.append, human_permission)
+        instance = adapter.WorkBuddyAdapter(self.task, "/tmp", events.append, human_permission,
+                                             model="glm-5.3-flash", context_tokens=1000000)
         acp = Mock()
         acp.new_session.return_value = "own-acp-session"
+        acp.select_model.return_value = {"id": "glm-5.3-flash", "name": "GLM-5.3-Flash",
+                                         "max_input_tokens": 1000000, "selection_confirmed": True}
+        acp.select_context.return_value = {"context_tokens": 1000000, "context_choices": [],
+                                           "context_source": "advertised_model_limit",
+                                           "context_requested": 1000000}
         acp.prompt.return_value = {"session_id": "own-acp-session", "answer": "done",
                                    "stop_reason": "end_turn"}
         calls = []
@@ -131,6 +139,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(calls[0][1], "session.create")
         self.assertEqual(request["command"], str(app / "Contents/MacOS/Electron"))
         self.assertEqual(request["args"][0], str(info["cli"]))
+        self.assertEqual(request["args"][request["args"].index("--model") + 1], "glm-5.3-flash")
+        self.assertEqual(request["args"][request["args"].index("--autocompact") + 1], "1000000")
         self.assertEqual(request["port"], 0)
         self.assertEqual(request["env"]["CODEBUDDY_FORCE_LITE_WB_BUNDLE"], "1")
         self.assertEqual(request["env"]["ELECTRON_RUN_AS_NODE"], "1")
@@ -144,6 +154,15 @@ class RecoveryTests(unittest.TestCase):
         acp.new_session.assert_called_once_with(instance.cwd)
         acp.request.assert_called_once_with("session/set_config_option", {
             "sessionId": "own-acp-session", "configId": "mode", "value": "default"})
+        acp.select_model.assert_called_once_with("glm-5.3-flash")
+        acp.select_context.assert_called_once_with(1000000, acp.select_model.return_value)
+        methods = [call[0] for call in acp.method_calls]
+        self.assertLess(methods.index("select_model"), methods.index("select_context"))
+        self.assertLess(methods.index("select_context"), methods.index("prompt"))
+        model_event = next(event for event in events if event["type"] == "model")
+        self.assertEqual(model_event["model"]["id"], "glm-5.3-flash")
+        self.assertEqual(model_event["model"]["context_tokens"], 1000000)
+        self.assertEqual(model_event["model"]["auto_compact_window_requested"], 1000000)
         self.assertNotIn("SYNTHETIC-SECRET", repr(events))
         human_permission.assert_not_called()
 

@@ -69,6 +69,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         start = next(tool for tool in tools if tool.name == "start_task")
         self.assertIn("request_id", start.inputSchema["properties"])
         self.assertNotIn("request_id", start.inputSchema["required"])
+        self.assertEqual(start.inputSchema["properties"]["model"]["default"], "deepseek-v4.1-flash")
+        self.assertIn("context_tokens", start.inputSchema["properties"])
+        self.assertNotIn("context_tokens", start.inputSchema["required"])
         arguments = {"prompt": "test", "cwd": str(self.cwd), "request_id": "mcp-request-001"}
         first = structured(await self.server.call_tool("start_task", arguments))
         await asyncio.to_thread(self.controller.entered.wait, 1)
@@ -77,3 +80,49 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.controller.instances), 1)
         self.controller.release.set()
         await self.server.call_tool("wait_task", {"task_id": first["task_id"], "timeout_seconds": 2})
+
+    async def test_read_only_initialization_health_works_while_task_directory_locked(self):
+        # The explicit manager owns this actual flock, like the first Codex chat.
+        with patch.dict("os.environ", {"WORKBUDDY_BRIDGE_STATE_DIR": str(self.manager.state_dir)}), \
+                patch("workbuddy_bridge_intelmac.server.Manager", wraps=Manager) as constructor, \
+                patch("workbuddy_bridge_intelmac.adapter.health", return_value={"available": True, "read_only": True}):
+            second = create_server()
+            async with second.settings.lifespan(second):
+                tools = await second.list_tools()
+                self.assertIn("health", {tool.name for tool in tools})
+                self.assertEqual(structured(await second.call_tool("health", {})),
+                                 {"available": True, "read_only": True})
+                constructor.assert_not_called()
+                with self.assertRaisesRegex(Exception, "只允许一个任务服务"):
+                    await second.call_tool("start_task", {"prompt": "test", "cwd": str(self.cwd)})
+                self.assertEqual(constructor.call_count, 1)
+                self.assertEqual(self.manager._tasks, {})
+                self.assertEqual(structured(await second.call_tool("health", {}))["available"], True)
+                self.assertEqual(constructor.call_count, 1)
+            # Closing an unused or failed second server must preserve the owner.
+            self.assertIsNotNone(self.manager._lock_fd)
+
+    async def test_concurrent_first_task_calls_create_only_one_manager(self):
+        with patch("workbuddy_bridge_intelmac.server.Manager", return_value=self.manager) as constructor:
+            lazy = create_server()
+            await asyncio.gather(
+                lazy.call_tool("get_task", {"task_id": "missing"}),
+                lazy.call_tool("get_result", {"task_id": "missing"}),
+                return_exceptions=True,
+            )
+            constructor.assert_called_once_with()
+
+    async def test_lifespan_closes_only_initialized_manager(self):
+        with patch("workbuddy_bridge_intelmac.server.Manager", return_value=self.manager) as constructor, \
+                patch.object(self.manager, "close", wraps=self.manager.close) as close:
+            unused = create_server()
+            async with unused.settings.lifespan(unused):
+                await unused.list_tools()
+            constructor.assert_not_called()
+            close.assert_not_called()
+            used = create_server()
+            async with used.settings.lifespan(used):
+                with self.assertRaises(Exception):
+                    await used.call_tool("get_task", {"task_id": "missing"})
+            constructor.assert_called_once_with()
+            close.assert_called_once_with()
