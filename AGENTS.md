@@ -1,7 +1,7 @@
 # 开发约定
 
 - 项目名使用 `codex-workbuddy-bridge-intelmac`，面向 Intel Mac。
-- 当前为 alpha.3 发布候选；冷启动、权限、取消、故障和整 GUI 退出/重开真实矩阵通过。最终自动测试与仓库 Release 决定实际发布状态，不提前声称已发布；正式版仍待 Codex 原生加载更新代码、新用量核对与发布检查。旧暖启动用量已确认，新路径用量仍待确认。
+- 当前为 alpha.3 开发版；冷启动、权限、取消、故障和整 GUI 退出/重开真实矩阵通过。本机与云端自动测试已通过，发布状态以仓库 Release 为准；正式版仍待 Codex 原生加载更新代码、新用量核对与发布检查。旧暖启动用量已确认，新路径用量仍待确认。
 - health 保持只读；ready_for_task 与 runtime_ready、authenticated 分开报告，冷启动 authenticated=null 不代表认证失败。
 - 原生保护材料仅在应用内置运行时和临时私有 socket 握手中使用，不流入 Python、日志、任务记录或文档。保留字段加密，应用密钥辅助函数 createIfMissing=false；产品缓存只读投影，未知版本拒绝任务。
 - 只清理自有 worker 与进程组，保留权限交互、request_id 幂等、uncertain 与 cleanup_pending/cleanup_confirmed 语义；GUI 退出不能误报成功。
