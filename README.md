@@ -24,13 +24,14 @@
 - 用户账号用量页显示新路径的 7 条记录共 2.88 积分，使用端为 WorkBuddy；剩余请求的用量未知。
 - 自动测试结果见 [测试报告](docs/TEST_REPORT.md)；[云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml) 的结果以对应提交的运行记录为准。
 
-只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据，目标桌面 MCP 尚未继承。详细范围和待办见 [验收与差距](docs/AUDIT.md)。
+只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据；部分 MCP 已实际调用成功，通达信、同花顺和目标法律工具仍未发现。详见 [三模型 MCP 实测](docs/MCP_TEST.md) 和 [验收与差距](docs/AUDIT.md)。
 
 ## 文档
 
 - [验收与差距](docs/AUDIT.md)：模型、上下文、工具继承和上游能力对照。
 - [移植计划](docs/PLAN.md)：范围、步骤和验收条件。
 - [桌面连接器适配](docs/CONNECTORS.md)：已验证的协议边界与后续实现顺序。
+- [三模型 MCP 实测](docs/MCP_TEST.md)：Deepseek、GLM、Kimi 的真实调用、依赖错误和账号用量边界。
 - [测试报告](docs/TEST_REPORT.md)：成功、失败及待验证项。
 - [版本兼容](docs/COMPATIBILITY.md)：哪些环境实际测过。
 - [冷启动设计](docs/COLD_START.md)：原生握手、自有资源与更新维护。

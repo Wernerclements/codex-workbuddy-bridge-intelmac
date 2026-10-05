@@ -4,6 +4,12 @@
 
 上游固定提交：`c00a8e5eab809a97963277e71ec008abb3d372ae`。
 
+## 2026-10-05 三模型 MCP 补充验收
+
+通过当前对话原生 workbuddy_intelmac，确认服务版本 0.1.0 后串行执行。三个模型均实际调用 sheetagent 解析，返回本机编辑器接口 ECONNREFUSED；Deepseek 与 GLM 的 scansci-pdf 健康检查成功返回 degraded。通达信、同花顺与法律三目标仍未发现。Kimi 的默认文档请求在执行前停止，没有访问真实文档；不将其列为健康检查失败。完整证据、七条已接受 prompt、一次发送前模型目录失败、首次 Deepseek 清理标记待同步及首四条 21.65 积分边界见 [三模型 MCP 实测](MCP_TEST.md)。
+
+本项是现有代码真实验收，不增加单元测试数量；文档与 Skill 说明更新后，本机再次执行 34 项上游回归与 198 项项目测试，232 项全部通过。下方云端记录属于相应历史提交，本轮云端状态以新 PR 检查为准。
+
 ## 当前验收结论：alpha.3 冷启动修复
 
 **2026-10-05：新冷启动、权限、取消、故障及整个 GUI 退出/重开真实矩阵通过。** v0.1.0 的执行逻辑与已验收的 alpha.3 相同，仅更新版本号和文档。用户完全重启 Codex 后，原生 MCP 恰好一次只读 `health` 返回 `bridge_version=0.1.0a3`、`available=true`、`ready_for_task=true`、`runtime_ready=false`、`authenticated=null`、WorkBuddy 5.6.2，确认新版原生入口已加载；该检查未提交任务。用户账号用量页已核对新路径 7 条、2.88 积分，其他已接受请求的消耗仍未知。#1、#2 已关闭；#3 发布状态以仓库 Issue 和 Release 为准；#5 目标桌面 MCP 仍未继承。
