@@ -1,15 +1,15 @@
 # WorkBuddy 桌面连接器适配
 
-日期：2026-10-04。适配基准：WorkBuddy 5.6.2、Intel Mac、桥接器 v0.1.0-alpha.2。跟踪：[待办 #5](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/issues/5)。
+日期：2026-10-05。适配基准：WorkBuddy 5.6.2、Intel Mac、桥接器 v0.1.0。跟踪：[待办 #5](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/issues/5)。早期协议研究来自 alpha.2，当前实测见下方。
 
 ## 当前结论
 
-现有桥接任务可使用 WorkBuddy 用户 Skill，find-skills 已有真实加载证据。通达信、同花顺与法律连接器虽然在桌面启用，尚未进入桥接会话的工具集合。两个指定模型和 1m 上下文预算已验证，但这与连接器继承是独立验收项。
+现有桥接任务可使用 WorkBuddy 用户 Skill，find-skills 已有真实加载证据；部分现有 MCP 也已有实际执行证据。Deepseek 与 GLM 的 scansci-pdf 健康检查成功返回；Deepseek、GLM、Kimi 均实际执行 sheetagent 解析，但本机编辑器服务拒绝连接，未读取表格。通达信、同花顺与法律连接器虽然在桌面启用，三个模型本轮均未发现目标工具。两个主力模型和 1m 上下文预算已验证，但不能据此证明完整连接器继承。详见 [三模型 MCP 实测](MCP_TEST.md)。
 
 | 路径 | 已核对证据 | 对适配的作用 |
 | --- | --- | --- |
 | 应用内置 CLI + sidecar + ACP | 当前桥接真实任务成功 | 沿用账号、模型、用户 Skill；缺桌面会话工具投影 |
-| 用户 MCP 配置文件 | 默认加载及显式指定 mcp.json 的任务都未找到目标工具 | 文件路径调整不能补齐桌面工具 |
+| 用户 MCP 配置文件 | 早期默认加载及显式 mcp.json 实验未发现三个目标；当前部分已有 MCP 可通过 DeferExecuteTool 执行 | 不能把目标缺失泛化为全部 MCP 不可调用；完整桌面工具投影仍待适配 |
 | WBIPC | 真实 HMAC 握手、只读 ListPipes/GetPipe；protocol=1，仅 wb.request/http.fetch | 可做已认证云端请求转发；不能调用桌面 mcpList 或工具配置投影 |
 | WBHub 业务接口 | 应用源码存在 mcpList/mcpDescribe 与会话工具投影 | 需找到实际对外传输入口；不能把方法名发送给 sidecar/WBIPC |
 | 本机 MCP 网关 | 源码要求路由令牌与签名会话上下文；本机无凭证 initialize/tools/list 均返回 401 | 新委派会话需要由应用生成有效配置及上下文 |
@@ -32,4 +32,4 @@ WBIPC 清单检查没有调用 http.fetch，没有发外部请求或模型 promp
 
 ## 发布范围
 
-#5 保持开放。当前 alpha 版本不宣称完整继承桌面 MCP。单任务桥接正式发布是否包含连接器能力，应由明确发布范围和真实验收结果决定；Codex 原生工具加载已通过；整应用退出后的冷启动恢复未通过，仍阻塞 #2/#3。
+#5 保持开放。v0.1.0 已正式发布，冷启动与整应用退出恢复已通过，原三项里程碑已关闭。当前可调用部分现有 MCP，不宣称完整继承桌面连接器。表格本机服务依赖、延迟工具权限详情和清理标记同步仍需分别处理；这些边界见三模型实测报告。

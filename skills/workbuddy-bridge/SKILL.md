@@ -36,6 +36,12 @@ description: Delegate a task from Codex to the existing WorkBuddy desktop applic
 
 当前主力模型为 `deepseek-v4.1-flash`（默认）和 `glm-5.3-flash`。根据用户选择显式传入模型；长资料任务可指定 `context_tokens=1000000`，未指定时沿用该模型默认预算。相同 request_id 重试必须保留模型和上下文参数。核对结果中的 model.selection_confirmed、model.context_tokens 与 usage.context_size；不要把配置确认称为百万 token 长输入实测。
 
-用户 Skill 已有真实加载证据；通达信、同花顺、法律等桌面连接器目前未可靠继承。先以实际工具发现和完成事件核对，不根据历史缓存或界面启用状态宣称可用，不向用户承诺调用不存在的工具。
+用户 Skill 已有真实加载证据；部分现有 MCP 也已有实际执行证据：Deepseek 与 GLM 的 scansci-pdf 健康检查成功返回，三个模型的 sheetagent 解析因本机编辑器服务拒绝连接而失败。通达信、同花顺、法律等桌面连接器仍未可靠继承。先以实际工具发现、调用参数和返回核对，不根据历史缓存或界面启用状态宣称可用，不向用户承诺调用不存在的工具。
+
+Kimi K3 的已验证模型 ID 为 `kimi-k3-1`，本轮仅确认模型选择与 MCP 解析调用，未验证该模型的健康检查成功率。主力默认模型仍为 Deepseek/GLM。
+
+延迟工具可能显示为 DeferExecuteTool 且权限 input 为空；不能凭包装器名称批准操作。先核对本任务自身原生记录中的真实工具和参数，只响应用户明确授权范围内的 allow_once。工具完成但正文包含 error 不算业务成功。sheetagent 的默认 session 可能对应真实用户文档，不在虚构文件测试授权内。
+
+2026-10-05 三模型 MCP 测试用户核对首四条 21.65 积分，其中定向 Kimi 任务 18.99；后续三条用量未知，不能推断取消任务免费。详细记录见项目 docs/MCP_TEST.md。
 
 初始化和 health 可跨对话；任务操作仍由一个服务持有记录目录。出现锁冲突时说明限制，不创建另一任务目录规避并发规则，不关闭其他对话服务。

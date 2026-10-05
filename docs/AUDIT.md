@@ -37,7 +37,11 @@ Deepseek-V4.1-Flash 与 GLM-5.3-Flash 均完成真实短任务、模型回显和
 
 旧暖启动验收中，用户于 2026-10-04 提供 WorkBuddy 用量页记录并确认消耗正常：北京时间 16:07、16:10、16:20 的 Deepseek-V4.1-Flash 分别扣减 0.60、0.61、0.51 积分，共 1.72；16:08 的 GLM-5.3-Flash 扣减 0.54 积分，合计 2.26。时间和模型与本次四项真实测试对应，使用端显示 CLI。结合此前账号归属与无额外计费提示的确认，两个主力模型当时的订阅复用验收通过；本轮新路径已有七条 2.88 积分的独立核对，其余请求消耗未知。
 
-## MCP 与 Skill 继承（alpha.2 证据，缺口仍存在）
+## MCP 与 Skill 继承
+
+2026-10-05 v0.1.0 新验收：Deepseek 与 GLM 通过 DeferExecuteTool 实际调用 scansci-pdf 健康检查并返回结果；三个模型均实际执行 sheetagent 解析，因本机编辑器接口拒绝连接而未读取文件。部分现有 MCP 可调用，三个目标桌面连接器仍未发现。Kimi 请求默认文档超出虚构文件授权范围，执行前停止；不能据此比较三个模型的健康检查成功率。用户核对首四条 21.65 积分，后续三条用量未知。完整边界见 [三模型 MCP 实测](MCP_TEST.md)。
+
+以下为 alpha.2 历史证据，仍支持三个目标工具的缺口，但不代表全部 MCP 不可调用：
 
 - 两个模型都实际调用了 ToolSearch 和 Skill；Skill 加载现有 find-skills。工具调用事件与完成状态可核对。
 - 补充读取本次测试任务自身的原生 CLI 历史：Skill 结果的 Base directory 精确指向 ~/.workbuddy/skills/find-skills，继承有原生结果证据；ToolSearch 返回1个相关候选 mcp__sheetagent__search_data，四个目标工具均不匹配。不会把任意 found 状态当作目标工具已发现。
