@@ -84,7 +84,7 @@ class IdentityTests(unittest.TestCase):
                 "intel_binary": True, "executable": executable}), \
                 patch.object(owned.subprocess, "run", return_value=SimpleNamespace(stdout="\n".join(lines))), \
                 patch.object(owned, "process_identity", return_value=identity()) as inspect:
-            self.assertEqual(owned.gui_identity(), {"pid": 100, "start": START})
+            self.assertEqual(owned.gui_identity(), {"pid": 100, "start": START, "version": "5.6.2"})
         inspect.assert_called_once_with(100)
 
     def test_multiple_gui_instances_refuse_cold_launch(self):
@@ -104,7 +104,7 @@ class IdentityTests(unittest.TestCase):
                    "WORKBUDDY_AT_REST_ENCRYPTION": "ambient-secret",
                    "CODEBUDDY_CREDENTIAL_BOOTSTRAP": "ambient-secret", "BROKER_LEASE": "ambient-secret"}
         with patch.dict(os.environ, ambient, clear=True):
-            env = owned.launch_environment("local-gateway-secret")
+            env = owned.launch_environment("local-gateway-secret", version="5.6.2")
         self.assertEqual(env["PATH"], "/usr/bin")
         self.assertEqual(env["CODEBUDDY_GATEWAY_AUTH"], "password")
         self.assertEqual(env["CODEBUDDY_GATEWAY_PASSWORD"], "local-gateway-secret")
@@ -118,6 +118,16 @@ class IdentityTests(unittest.TestCase):
                          "/synthetic/home/.workbuddy/cache/acc-product-config-v3.json")
         self.assertEqual(env["CLIENT_INFO_PLATFORM_VERSION"], "5.6.2")
         self.assertEqual(env["CLIENT_INFO_PRODUCT_NAME"], "WorkBuddy")
+        self.assertNotIn("CODEBUDDY_DISABLE_PRODUCT_CACHE", env)
+
+    def test_new_version_environment_is_exact_and_unknown_version_refuses(self):
+        env = owned.launch_environment("synthetic-local-password", version="5.7.7")
+        self.assertEqual(env["CODEBUDDY_DISABLE_PRODUCT_CACHE"], "1")
+        for key in ("CLIENT_INFO_PLATFORM_VERSION", "CLIENT_INFO_PRODUCT_VERSION", "CLIENT_INFO_PLUGIN_VERSION"):
+            self.assertEqual(env[key], "5.7.7")
+        with patch.object(owned.Path, "lstat") as read, self.assertRaises(WorkBuddyError):
+            owned.launch_environment("synthetic-local-password", version="99.0.0")
+        read.assert_not_called()
         self.assertEqual(env["CODEBUDDY_HOST"], "workbuddy-desktop")
 
     def test_product_cache_path_is_passed_without_reading_or_writing_body(self):
@@ -125,14 +135,14 @@ class IdentityTests(unittest.TestCase):
                 patch.object(owned.Path, "read_bytes", side_effect=AssertionError("cache body read")), \
                 patch.object(owned.Path, "write_text", side_effect=AssertionError("cache modified")), \
                 patch.object(owned.Path, "write_bytes", side_effect=AssertionError("cache modified")):
-            env = owned.launch_environment("synthetic-local-password")
+            env = owned.launch_environment("synthetic-local-password", version="5.6.2")
         self.assertEqual(env["ACC_PRODUCT_CONFIG_PATH"],
                          "/synthetic/home/.workbuddy/cache/acc-product-config-v3.json")
 
     def test_missing_product_cache_refuses_launch_environment(self):
         with patch.object(owned.Path, "lstat", side_effect=FileNotFoundError), \
                 self.assertRaises(WorkBuddyError):
-            owned.launch_environment("synthetic-local-password")
+            owned.launch_environment("synthetic-local-password", version="5.6.2")
 
     def test_unsafe_product_cache_metadata_refuses_launch_environment(self):
         cases = [(stat.S_IFLNK | 0o600, os.getuid(), 1234),
@@ -146,7 +156,7 @@ class IdentityTests(unittest.TestCase):
             with self.subTest(mode=mode, uid=uid, size=size), \
                     patch.object(owned.Path, "lstat", return_value=SimpleNamespace(
                         st_mode=mode, st_uid=uid, st_size=size)), self.assertRaises(WorkBuddyError):
-                owned.launch_environment("synthetic-local-password")
+                owned.launch_environment("synthetic-local-password", version="5.6.2")
 
     def test_listener_must_belong_to_worker_and_exact_loopback_address(self):
         for output in ["n*:3456\n", "n[::1]:3456\n", "n127.0.0.1:34567\n"]:
@@ -315,7 +325,7 @@ class LifecycleTests(unittest.TestCase):
         self.addCleanup(directory.stop)
 
     def instance(self, callback=None):
-        with patch.object(owned, "gui_identity", return_value={"pid": 100, "start": START}):
+        with patch.object(owned, "gui_identity", return_value={"pid": 100, "start": START, "version": "5.6.2"}):
             return owned.OwnedRuntime(TASK, "/tmp", ["synthetic-entry", "--serve"], callback or Mock())
 
     def test_stop_clears_in_memory_password_and_output(self):
@@ -327,11 +337,28 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(runtime._buffer, "")
         self.assertTrue(runtime._closed.is_set())
 
+    def test_stop_rechecks_delayed_reaper_without_overwriting_failure(self):
+        for final in ({"cleaned": True}, {"cleaned": False, "reason": "still pending"}):
+            runtime = self.instance()
+            runtime.process = Mock()
+            with self.subTest(final=final), patch.object(owned, "recover_owned", side_effect=[
+                    {"cleaned": False, "reason": "reaper finishing"}, final]) as recover:
+                self.assertEqual(runtime.stop(), final)
+            runtime.process.wait.assert_called_once_with(timeout=2)
+            self.assertEqual(recover.call_count, 2)
+
+    def test_update_between_identity_and_spawn_refuses_worker(self):
+        runtime = self.instance()
+        with patch.object(owned, "app_info", return_value={"version": "5.7.7", "intel_binary": True}), \
+                patch.object(owned.subprocess, "Popen") as launch, self.assertRaises(WorkBuddyError):
+            runtime.start(threading.Event())
+        launch.assert_not_called()
+
     def test_runtime_event_stop_before_spawn_cannot_launch_worker(self):
         runtime = self.instance()
         runtime.on_event = lambda event: runtime.stop()
         with patch.object(owned, "recover_owned", return_value={"cleaned": True}), \
-                patch.object(owned, "app_info", return_value={"executable": "synthetic-app"}), \
+                patch.object(owned, "app_info", return_value={"executable": "synthetic-app", "version": "5.6.2", "intel_binary": True}), \
                 patch.object(owned.subprocess, "Popen") as launch, self.assertRaises(WorkBuddyError):
             runtime.start(threading.Event())
         launch.assert_not_called()
@@ -339,7 +366,7 @@ class LifecycleTests(unittest.TestCase):
     def test_runtime_event_cancel_before_spawn_cannot_launch_worker(self):
         cancelled = threading.Event()
         runtime = self.instance(lambda event: cancelled.set())
-        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app"}), \
+        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app", "version": "5.6.2", "intel_binary": True}), \
                 patch.object(owned.subprocess, "Popen") as launch, self.assertRaises(WorkBuddyError):
             runtime.start(cancelled)
         launch.assert_not_called()
@@ -348,6 +375,7 @@ class LifecycleTests(unittest.TestCase):
         callback = Mock(side_effect=RuntimeError("synthetic callback failure"))
         runtime = self.instance(callback)
         runtime.process = Mock()
+        runtime.process.poll.return_value = None
         runtime._closed = Mock()
         runtime._closed.wait.return_value = False
         runtime.stop = Mock()
@@ -355,7 +383,7 @@ class LifecycleTests(unittest.TestCase):
                 self.assertRaises(RuntimeError):
             runtime._watch()
         self.assertTrue(runtime.lost.is_set())
-        callback.assert_called_once_with({"type": "runtime_lost"})
+        callback.assert_called_once_with({"type": "runtime_lost", "diagnostics": {"reason": "gui_changed"}})
         runtime.stop.assert_called_once()
 
     def test_gui_pid_reuse_is_runtime_loss(self):
@@ -369,12 +397,37 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(runtime.lost.is_set())
         runtime.stop.assert_called_once()
 
+    def test_gui_probe_timeout_does_not_stop_a_live_worker(self):
+        runtime = self.instance()
+        runtime.process = Mock()
+        runtime.process.poll.return_value = None
+        runtime._closed = Mock()
+        runtime._closed.wait.side_effect = [False, False, True]
+        runtime.stop = Mock()
+        with patch.object(owned, "process_identity", side_effect=[
+                owned.subprocess.TimeoutExpired("ps", 3), identity()]):
+            runtime._watch()
+        self.assertFalse(runtime.lost.is_set())
+        runtime.stop.assert_not_called()
+
+    def test_child_exit_is_detected_even_if_gui_probe_times_out(self):
+        runtime = self.instance()
+        runtime.process = Mock()
+        runtime.process.poll.return_value = 3
+        runtime._closed = Mock()
+        runtime._closed.wait.return_value = False
+        runtime.stop = Mock()
+        with patch.object(owned, "process_identity", side_effect=owned.subprocess.TimeoutExpired("ps", 3)):
+            runtime._watch()
+        self.assertTrue(runtime.lost.is_set())
+        runtime.stop.assert_called_once()
+
     def test_start_does_not_authenticate_another_process_listener(self):
         cancelled = threading.Event()
         runtime = self.instance()
         process = Mock(pid=PID)
         runtime._buffer = "INTELMAC_PROTECTED_RUNTIME_READY\nhttp://127.0.0.1:3456"
-        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app"}), \
+        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app", "version": "5.6.2", "intel_binary": True}), \
                 patch.object(owned.subprocess, "Popen", return_value=process), \
                 patch.object(owned, "process_identity", return_value=identity()), \
                 patch.object(owned.threading.Thread, "start"), \
@@ -392,7 +445,7 @@ class LifecycleTests(unittest.TestCase):
             runtime = self.instance()
             runtime._buffer = "INTELMAC_PROTECTED_RUNTIME_READY\nhttp://127.0.0.1:3456"
             with self.subTest(status=status), \
-                    patch.object(owned, "app_info", return_value={"executable": "synthetic-app"}), \
+                    patch.object(owned, "app_info", return_value={"executable": "synthetic-app", "version": "5.6.2", "intel_binary": True}), \
                     patch.object(owned.subprocess, "Popen", return_value=Mock(pid=PID)), \
                     patch.object(owned, "process_identity", return_value=identity()), \
                     patch.object(owned.threading.Thread, "start"), \
@@ -406,7 +459,7 @@ class LifecycleTests(unittest.TestCase):
         cancelled = threading.Event()
         runtime = self.instance()
         runtime._buffer = "http://127.0.0.1:3456"
-        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app"}), \
+        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app", "version": "5.6.2", "intel_binary": True}), \
                 patch.object(owned.subprocess, "Popen", return_value=Mock(pid=PID)), \
                 patch.object(owned, "process_identity", return_value=identity()), \
                 patch.object(owned.threading.Thread, "start"), \
@@ -421,7 +474,7 @@ class LifecycleTests(unittest.TestCase):
         runtime = self.instance()
         runtime._buffer = "INTELMAC_PROTECTED_RUNTIME_READY\nhttp://127.0.0.1:3456"
         password = runtime.password
-        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app"}), \
+        with patch.object(owned, "app_info", return_value={"executable": "synthetic-app", "version": "5.6.2", "intel_binary": True}), \
                 patch.object(owned.subprocess, "Popen", return_value=Mock(pid=PID)) as launch, \
                 patch.object(owned, "process_identity", return_value=identity()), \
                 patch.object(owned.threading.Thread, "start"), \

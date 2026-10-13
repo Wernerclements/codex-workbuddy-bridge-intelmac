@@ -2,7 +2,7 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。旧暖启动任务已核对 2.26 积分；新冷启动路径从用户用量页核对 7 条、2.88 积分，其余已接受请求的消耗尚未确定。
 
-**v0.1.0：冷启动、权限、取消、故障及整个应用退出/重开真实验收通过。** Codex 原生 MCP 已在完全重启后确认加载同功能的 `0.1.0a3`；本版变更版本号和文档。发布状态见仓库 Release。安装说明见 [INSTALL](docs/INSTALL.md)。
+**v0.1.1：适配 WorkBuddy 5.7.7，加入 Step-5-Preview 验收，修复重开时的模型目录竞态、保护握手等待和清理状态刷新。** 详细范围与限制见 [5.7.7 适配记录](docs/WORKBUDDY_5_7_7.md)。本次真实验收使用新代码的独立 MCP 服务；已运行的 Codex MCP 需要完全重启后确认版本。发布状态见仓库 Release。安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
 
@@ -16,17 +16,19 @@
 
 ## 已验证
 
-- 2019 Intel Mac / macOS 26.5.1，WorkBuddy **5.6.2**；当前严格限制这个应用版本。
-- GUI 已登录但没有 sidecar 时，双模型短任务与 1m 会话预算通过；预算设置不代表百万 token 满载测试。
+- 2019 Intel Mac / macOS 26.5.1，WorkBuddy **5.7.7**；保留历史已验证的 **5.6.2**，5.7.6 及其他版本拒绝任务。
+- GUI 已登录但没有 sidecar 时，Deepseek、GLM、Step 三模型短任务通过；Step 确认 1m 会话预算，历史 5.6.2 双模型也确认过 1m。预算设置不代表百万 token 满载测试。
 - 文件允许一次、明确 Bash 命令允许一次、目录外 Bash 拒绝、流式取消通过，自有资源清理均确认。
-- 新路径的错误本机凭证、worker 失联和 MCP 服务强制结束/重启通过；中断任务 uncertain，不自动重发。
+- 历史 5.6.2 新路径的错误本机凭证、worker 失联和 MCP 服务强制结束/重启通过；本次未重跑这些额外故障场景。中断任务 uncertain，不自动重发。
 - 整个 GUI 在流式输出及等待权限时正常退出/重开通过；权限等待解除、未授权文件未生成，旧请求幂等，新自有任务成功，清理确认。
-- 用户账号用量页显示新路径的 7 条记录共 2.88 积分，使用端为 WorkBuddy；剩余请求的用量未知。
+- 历史 5.6.2 用量页核对新路径 7 条记录共 2.88 积分，使用端为 WorkBuddy；本次 5.7.7 用量未核对。Step 额外取消请求遇到服务端队列满，未进入取消阶段。
 - 自动测试结果见 [测试报告](docs/TEST_REPORT.md)；[云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml) 的结果以对应提交的运行记录为准。
 
 只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据；部分 MCP 已实际调用成功，通达信、同花顺和目标法律工具仍未发现。详见 [三模型 MCP 实测](docs/MCP_TEST.md) 和 [验收与差距](docs/AUDIT.md)。
 
 ## 文档
+
+- [5.7.7 适配记录](docs/WORKBUDDY_5_7_7.md)：本次修复、三模型任务、恢复验收和限制。
 
 - [验收与差距](docs/AUDIT.md)：模型、上下文、工具继承和上游能力对照。
 - [移植计划](docs/PLAN.md)：范围、步骤和验收条件。
@@ -46,7 +48,7 @@ python3 scripts/install.py
 
 Intel 原生依赖缺少预编译包时，在已有编译工具的环境中使用 `--allow-source-build`。安装器备份并合并 Codex 配置，详见 [安装说明](docs/INSTALL.md)。首次安装后重新加载 Codex MCP 或重启应用。
 
-MCP 提供 `start_task`、`get_task`、`wait_task`、`cancel_task`、`get_result`、`health` 与 `respond_permission`。结果完整正文落盘，工具返回摘要与文件路径。`start_task` 可指定 `model` 和 `context_tokens`，默认模型为 `deepseek-v4.1-flash`；另一个主力模型为 `glm-5.3-flash`。指定 `context_tokens=1000000` 可选择已验证的 1m 会话预算。
+MCP 提供 `start_task`、`get_task`、`wait_task`、`cancel_task`、`get_result`、`health` 与 `respond_permission`。结果完整正文落盘，工具返回摘要与文件路径。`start_task` 可指定 `model` 和 `context_tokens`，默认模型为 `deepseek-v4.1-flash`；另一个主力模型为 `glm-5.3-flash`；本次新增 `step-5-preview` 真实短任务验收。指定 `context_tokens=1000000` 可选择已验证的 1m 会话预算。
 
 ## 重现测试
 

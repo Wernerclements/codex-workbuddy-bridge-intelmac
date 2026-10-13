@@ -5,12 +5,107 @@ from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 import os
 from pathlib import Path
+import plistlib
+import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
 from unittest.mock import patch
 
 from scripts import install, uninstall
+
+
+class InstallCompatibilityTests(unittest.TestCase):
+    def make_app(self, root: Path, version: str) -> Path:
+        app = root / "WorkBuddy.app"
+        contents = app / "Contents"
+        contents.mkdir(parents=True, exist_ok=True)
+        (contents / "Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleShortVersionString": version,
+            "CFBundleExecutable": "WorkBuddy",
+        }))
+        return app
+
+    def intel_commands(self, command, **kwargs):
+        if command == ["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]:
+            return subprocess.CompletedProcess(command, 0, stdout="0\n")
+        if command[:2] == ["/usr/bin/lipo", "-archs"]:
+            return subprocess.CompletedProcess(command, 0, stdout="x86_64\n")
+        self.fail(f"Unexpected preflight command: {command}")
+
+    def test_supported_versions_pass_real_app_preflight(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for version in ("5.6.2", "5.7.7"):
+                app = self.make_app(Path(temporary), version)
+                with self.subTest(version=version), patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=self.intel_commands):
+                    self.assertEqual(install.check_app(app), version)
+
+    def test_unaccepted_versions_stop_before_install_or_config_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.toml"
+            original = b'model="keep"\n'
+            config.write_bytes(original)
+            for version in ("5.7.6", "99.0.0"):
+                app = self.make_app(root, version)
+                with self.subTest(version=version), patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=self.intel_commands), patch.object(install, "find_python") as python, patch.object(install, "install_environment") as environment, patch.object(install, "write_config") as write, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    self.assertEqual(install.main(["--app", str(app), "--config", str(config), "--venv", str(root / "venv")]), 1)
+                python.assert_not_called()
+                environment.assert_not_called()
+                write.assert_not_called()
+                self.assertEqual(config.read_bytes(), original)
+                self.assertFalse((root / "venv").exists())
+                self.assertEqual(list(root.glob("*.bak")), [])
+
+    def test_577_install_preserves_config_and_creates_exact_backup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = self.make_app(root, "5.7.7")
+            config = root / "config.toml"
+            environment = root / "venv"
+            original = b'model="keep"\n'
+            config.write_bytes(original)
+            with patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=self.intel_commands), patch.object(install, "find_python", return_value=Path("/python3.12")), patch.object(install, "install_environment") as install_environment, redirect_stdout(StringIO()):
+                self.assertEqual(install.main(["--app", str(app), "--config", str(config), "--venv", str(environment)]), 0)
+            install_environment.assert_called_once_with(Path("/python3.12"), environment, False)
+            installed = config.read_bytes()
+            self.assertTrue(installed.startswith(original))
+            own = tomllib.loads(installed.decode())["mcp_servers"][install.SERVER]
+            self.assertEqual(own["env"]["WORKBUDDY_APP"], str(app))
+            backups = list(root.glob("*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), original)
+
+    def test_supported_version_does_not_bypass_rosetta_rejection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self.make_app(Path(temporary), "5.7.7")
+            with patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="1\n")) as run:
+                with self.assertRaisesRegex(install.InstallError, "Apple Silicon/Rosetta"):
+                    install.check_app(app)
+            self.assertEqual(run.call_count, 1)
+
+    def test_supported_version_requires_intel_app_binary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self.make_app(Path(temporary), "5.7.7")
+            results = [subprocess.CompletedProcess([], 0, stdout="0\n"), subprocess.CompletedProcess([], 0, stdout="arm64\n")]
+            with patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=results):
+                with self.assertRaisesRegex(install.InstallError, "Intel 可执行文件"):
+                    install.check_app(app)
+
+    def test_installer_loads_shared_versions_without_installed_package(self):
+        # -I removes checkout/PYTHONPATH imports; -S disables site packages.
+        code = (
+            "import runpy, sys; "
+            "installer = runpy.run_path(sys.argv[1]); "
+            "assert installer['SUPPORTED_VERSIONS'] == frozenset({'5.6.2', '5.7.7'}); "
+            "assert not any(name.startswith('workbuddy_bridge_intelmac') for name in sys.modules)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", code, str(install.ROOT / "scripts/install.py")],
+            cwd=tempfile.gettempdir(), capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class InstallConfigTests(unittest.TestCase):

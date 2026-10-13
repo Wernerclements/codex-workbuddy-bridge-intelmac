@@ -80,6 +80,27 @@ class ManagerTests(unittest.TestCase):
         self.managers.append(manager)
         return manager, controller
 
+    def pending_terminal_task(self, recover):
+        def behavior(instance, callbacks, prompt):
+            instance.close = lambda: {"cleaned": False}
+            return {"answer": "kept answer", "stop_reason": "end_turn"}
+        manager, controller = self.manager(Controller(behavior), recover=recover)
+        task_id = manager.start_task("one request", str(self.cwd))["task_id"]
+        deadline = time.monotonic() + 2
+        while True:
+            with manager._condition:
+                if task_id not in manager._adapters and manager._tasks[task_id]["status"] == "succeeded":
+                    return manager, controller, task_id
+            if time.monotonic() > deadline:
+                self.fail("fake task did not finish")
+            time.sleep(.01)
+
+    def wait_cleanup(self, manager, task_id):
+        with manager._condition:
+            self.assertTrue(manager._condition.wait_for(
+                lambda: task_id not in manager._cleanup_running, timeout=2),
+                "background cleanup did not finish")
+
     def test_wait_timeout_does_not_cancel_or_resubmit_and_tasks_are_serial(self):
         manager, controller = self.manager()
         first = manager.start_task("first", str(self.cwd))["task_id"]
@@ -509,12 +530,16 @@ class ManagerTests(unittest.TestCase):
         waiting = manager.wait_task(task_id, 2)
         self.assertEqual(waiting["status"], "permission_required")
         request_id = waiting["permission_request"]["request_id"]
-        callbacks_holder["on_event"]({"type": "runtime_lost", "reason": "private-loss-detail"})
+        callbacks_holder["on_event"]({"type": "runtime_lost", "reason": "private-loss-detail",
+            "diagnostics": {"reason": "worker_exited", "exit_code": 3,
+                "startup_stage": "credential_response", "raw_error": "private-loss-detail"}})
         with self.assertRaises(ValueError):
             manager.respond_permission(task_id, request_id, "allow")
         ended = manager.wait_task(task_id, 2)
         self.assertEqual(ended["status"], "uncertain")
         self.assertTrue(ended["runtime_lost"])
+        self.assertEqual(ended["runtime_diagnostics"], {"reason": "worker_exited", "exit_code": 3,
+                                                     "startup_stage": "credential_response"})
         self.assertFalse(ended["cancel_requested"])
         self.assertIsNone(ended["permission_request"])
         self.assertEqual(choices, [])
@@ -621,6 +646,170 @@ class ManagerTests(unittest.TestCase):
         result = manager.get_result(task_id)
         self.assertTrue(result["cleanup_pending"])
         self.assertFalse(result["cleanup_confirmed"])
+
+    def test_terminal_cleanup_query_updates_record_without_replaying_task(self):
+        def behavior(instance, callbacks, prompt):
+            instance.close = lambda: {"cleaned": False}
+            return {"answer": "kept answer", "stop_reason": "end_turn"}
+        recovered = []
+        manager, controller = self.manager(Controller(behavior), recover=lambda runtime:
+            recovered.append(runtime) or {"cleaned": True})
+        task_id = manager.start_task("one request", str(self.cwd))["task_id"]
+        deadline = time.monotonic() + 2
+        while task_id in manager._adapters or manager._tasks[task_id]["status"] not in {"succeeded"}:
+            if time.monotonic() > deadline:
+                self.fail("fake task did not finish")
+            time.sleep(.01)
+        manager.get_result(task_id)
+        self.wait_cleanup(manager, task_id)
+        after = manager.get_result(task_id)
+        self.assertEqual(after["status"], "succeeded")
+        self.assertEqual(after["summary"], "kept answer")
+        self.assertTrue(after["cleanup_confirmed"])
+        self.assertFalse(after["cleanup_pending"])
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(len(controller.instances), 1)
+        persisted = json.loads((manager.state_dir/task_id/"task.json").read_text())
+        self.assertTrue(persisted["cleanup_confirmed"])
+
+    def test_terminal_cleanup_failure_is_throttled_and_not_reported_as_success(self):
+        def behavior(instance, callbacks, prompt):
+            instance.close = lambda: {"cleaned": False}
+            return {"answer": "kept answer", "stop_reason": "end_turn"}
+        attempts = []
+        manager, controller = self.manager(Controller(behavior), recover=lambda runtime:
+            attempts.append(runtime) or {"cleaned": False})
+        task_id = manager.start_task("one request", str(self.cwd))["task_id"]
+        deadline = time.monotonic() + 2
+        while task_id in manager._adapters or manager._tasks[task_id]["status"] != "succeeded":
+            if time.monotonic() > deadline:
+                self.fail("fake task did not finish")
+            time.sleep(.01)
+        for unused in range(3):
+            result = manager.get_result(task_id)
+            self.assertTrue(result["cleanup_pending"])
+            self.assertFalse(result["cleanup_confirmed"])
+        self.wait_cleanup(manager, task_id)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(len(controller.instances), 1)
+
+    def test_slow_cleanup_does_not_block_query_result_or_zero_wait(self):
+        entered, release = threading.Event(), threading.Event()
+        def recover(runtime):
+            entered.set()
+            release.wait(3)
+            return {"cleaned": True}
+        manager, controller, task_id = self.pending_terminal_task(recover)
+        try:
+            started = time.monotonic()
+            task = manager.get_task(task_id)
+            self.assertTrue(entered.wait(1))
+            result = manager.get_result(task_id)
+            waited = manager.wait_task(task_id, 0)
+            self.assertLess(time.monotonic() - started, .5)
+            for response in (task, result, waited):
+                self.assertEqual(response["status"], "succeeded")
+                self.assertTrue(response["cleanup_pending"])
+                self.assertFalse(response["cleanup_confirmed"])
+            self.assertFalse(waited["wait_timed_out"])
+            self.assertEqual(result["summary"], "kept answer")
+        finally:
+            release.set()
+            self.wait_cleanup(manager, task_id)
+        self.assertTrue(manager.get_result(task_id)["cleanup_confirmed"])
+        self.assertEqual(len(controller.instances), 1)
+
+    def test_concurrent_queries_schedule_one_cleanup_for_same_task(self):
+        entered, release = threading.Event(), threading.Event()
+        attempts = []
+        def recover(runtime):
+            attempts.append(runtime)
+            entered.set()
+            release.wait(3)
+            return {"cleaned": True}
+        manager, controller, task_id = self.pending_terminal_task(recover)
+        barrier = threading.Barrier(6)
+        responses, errors = [], []
+        def query():
+            try:
+                barrier.wait(timeout=2)
+                responses.append(manager.get_task(task_id))
+            except Exception as error:
+                errors.append(error)
+        readers = [threading.Thread(target=query) for unused in range(6)]
+        try:
+            for reader in readers:
+                reader.start()
+            self.assertTrue(entered.wait(1))
+            for reader in readers:
+                reader.join(timeout=.5)
+            self.assertFalse(any(reader.is_alive() for reader in readers))
+            self.assertEqual(errors, [])
+            self.assertEqual(len(responses), 6)
+            self.assertEqual(len(attempts), 1)
+            self.assertTrue(all(response["cleanup_pending"] for response in responses))
+        finally:
+            release.set()
+            for reader in readers:
+                reader.join(timeout=2)
+            self.wait_cleanup(manager, task_id)
+        self.assertEqual(len(controller.instances), 1)
+
+    def test_cleanup_exception_is_redacted_throttled_and_can_retry(self):
+        attempts = []
+        def recover(runtime):
+            attempts.append(runtime)
+            if len(attempts) == 1:
+                raise PermissionError("private-recovery-secret")
+            return {"cleaned": True}
+        manager, controller, task_id = self.pending_terminal_task(recover)
+        manager.get_task(task_id)
+        self.wait_cleanup(manager, task_id)
+        failed = manager.get_task(task_id)
+        self.assertTrue(failed["cleanup_pending"])
+        self.assertFalse(failed["cleanup_confirmed"])
+        self.assertEqual(failed["cleanup_error_type"], "PermissionError")
+        self.assertNotIn("private-recovery-secret", json.dumps(failed))
+        self.assertEqual(len(attempts), 1)
+        with manager._condition:
+            manager._cleanup_checked[task_id] -= 2.1
+        manager.get_task(task_id)
+        self.wait_cleanup(manager, task_id)
+        after = manager.get_result(task_id)
+        self.assertTrue(after["cleanup_confirmed"])
+        self.assertFalse(after["cleanup_pending"])
+        self.assertEqual(after["summary"], "kept answer")
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(len(controller.instances), 1)
+
+    def test_close_fences_cleanup_updates_and_holds_lock_until_recovery_finishes(self):
+        entered, release = threading.Event(), threading.Event()
+        attempts = []
+        def recover(runtime):
+            attempts.append(runtime)
+            entered.set()
+            release.wait(3)
+            return {"cleaned": True}
+        manager, controller, task_id = self.pending_terminal_task(recover)
+        manager.get_task(task_id)
+        self.assertTrue(entered.wait(1))
+        record = manager.state_dir / task_id / "task.json"
+        try:
+            manager.close()
+            before = record.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "已有"):
+                self.manager()
+            manager.get_task(task_id)
+            self.assertEqual(len(attempts), 1)
+        finally:
+            release.set()
+            self.wait_cleanup(manager, task_id)
+        self.assertEqual(record.read_bytes(), before)
+        self.assertTrue(manager.get_result(task_id)["cleanup_pending"])
+        replacement, unused = self.manager(recover=lambda runtime: {"cleaned": True})
+        self.assertTrue(replacement.get_result(task_id)["cleanup_confirmed"])
+        self.assertEqual(unused.instances, [])
+        self.assertEqual(len(controller.instances), 1)
 
     def test_failed_restart_cleanup_remains_pending_and_preserves_terminal_status(self):
         task_id = str(uuid.uuid4())

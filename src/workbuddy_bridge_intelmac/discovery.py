@@ -16,12 +16,12 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
+from .compatibility import SUPPORTED_VERSIONS, SUPPORTED_PROTOCOL
+
 
 APP = Path(os.environ.get("WORKBUDDY_APP", "/Applications/WorkBuddy.app"))
 WORKER_PREFIX = "codex-intelmac-"
 HEADERS = {"x-codebuddy-request": "1"}
-SUPPORTED_VERSION = "5.6.2"
-SUPPORTED_PROTOCOL = 6
 
 
 class WorkBuddyError(RuntimeError):
@@ -186,18 +186,25 @@ def auth_status(endpoint: str, password: str) -> dict:
 
 def discover(*, for_write: bool = False) -> Desktop:
     info = app_info()
-    if for_write and (info["version"] != SUPPORTED_VERSION or not info["intel_binary"]):
+    if for_write and (info["version"] not in SUPPORTED_VERSIONS or not info["intel_binary"]):
         raise WorkBuddyError("当前 WorkBuddy 版本或架构尚未通过真实任务验收；请先更新兼容适配")
     candidates: list[Desktop] = []
     sockets = find_sockets()
+    idle_sidecars = 0
     for path, pid in sockets:
         try:
             ping = rpc(path, "sidecar.ping") or {}
             protocol = int(ping.get("version", 0))
             if protocol != SUPPORTED_PROTOCOL:
                 continue
-            sessions = rpc(path, "session.list") or []
-            for host in sessions:
+            sessions = rpc(path, "session.list")
+            if not isinstance(sessions, list) or any(not isinstance(item, dict) for item in sessions):
+                raise WorkBuddyError("WorkBuddy 会话列表格式不符合已验证协议")
+            hosts = [host for host in sessions
+                     if str(host.get("sessionId", "")).startswith("__workbuddy_cli_host__")]
+            if not hosts and not any(item.get("acpEndpoint") for item in sessions):
+                idle_sidecars += 1
+            for host in hosts:
                 if not str(host.get("sessionId", "")).startswith("__workbuddy_cli_host__") or not host.get("acpEndpoint"):
                     continue
                 endpoint = str(host["acpEndpoint"])
@@ -216,6 +223,10 @@ def discover(*, for_write: bool = False) -> Desktop:
     if len(candidates) > 1:
         raise WorkBuddyError("发现多个 WorkBuddy 桌面实例；请保留一个实例后重试")
     if not candidates:
+        # A known sidecar can exist before the desktop creates its CLI host.
+        # Unknown protocols, malformed replies, existing/auth-failed endpoints
+        # and multiple sidecars must never become a cold-start bypass.
+        cold = not sockets or (len(sockets) == 1 and idle_sidecars == 1)
         raise WorkBuddyError("未发现可认证的 WorkBuddy 桌面通道；请启动应用并登录",
-                            kind="unavailable" if sockets else "cold_start")
+                            kind="cold_start" if cold else "unavailable")
     return candidates[0]

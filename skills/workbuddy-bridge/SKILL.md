@@ -26,7 +26,7 @@ description: Delegate a task from Codex to the existing WorkBuddy desktop applic
 
 任务进入终态后调用 `get_result(task_id)`。读取 `answer_path` 指向的正文，核对 `status`、`artifacts` 文件清单、`partial`、`scan_limited`、`cleanup_pending` 和 `cleanup_confirmed`。长文本从结果文件读取，不仅依赖状态摘要。`partial=true` 表示正文或文件只保留了部分执行结果，必须说明尚未确认完整完成；扫描受限时，说明文件清单可能不完整。
 
-`uncertain` 表示执行结果未确认，不要自动重发；使用原 task_id 查询或使用完全相同 request_id 与参数取回记录。清理未确认时报告实际标记，不把任务终态当作资源清理已完成。应用更新后当前适配仅允许已验证的 5.6.2，不尝试绕过版本检查。
+`uncertain` 表示执行结果未确认，不要自动重发；使用原 task_id 查询或使用完全相同 request_id 与参数取回记录。清理未确认时报告实际标记，不把任务终态当作资源清理已完成。应用更新后当前适配仅允许 5.6.2、5.7.7，不尝试绕过版本检查；5.7.6 未完成验收。
 
 核对实际产物和用户的完成标准。报告任务是成功、失败、取消还是结果不确定。保留任务 ID 和可点击的结果路径。模拟测试通过、健康检查通过或账号已认证，都不能作为真实任务完成的证据。
 
@@ -38,6 +38,8 @@ description: Delegate a task from Codex to the existing WorkBuddy desktop applic
 
 用户 Skill 已有真实加载证据；部分现有 MCP 也已有实际执行证据：Deepseek 与 GLM 的 scansci-pdf 健康检查成功返回，三个模型的 sheetagent 解析因本机编辑器服务拒绝连接而失败。通达信、同花顺、法律等桌面连接器仍未可靠继承。先以实际工具发现、调用参数和返回核对，不根据历史缓存或界面启用状态宣称可用，不向用户承诺调用不存在的工具。
 
+5.7.7 新增 Step-5-Preview，准确 ID 为 `step-5-preview`。真实短任务及 1m 会话预算通过；额外取消测试遇到服务端 429 队列满，不能说 Step 取消已验证，不自动换模型或重发。本轮扣费尚未核对。
+
 Kimi K3 的已验证模型 ID 为 `kimi-k3-1`，本轮仅确认模型选择与 MCP 解析调用，未验证该模型的健康检查成功率。主力默认模型仍为 Deepseek/GLM。
 
 延迟工具可能显示为 DeferExecuteTool 且权限 input 为空；不能凭包装器名称批准操作。先核对本任务自身原生记录中的真实工具和参数，只响应用户明确授权范围内的 allow_once。工具完成但正文包含 error 不算业务成功。sheetagent 的默认 session 可能对应真实用户文档，不在虚构文件测试授权内。
@@ -45,3 +47,5 @@ Kimi K3 的已验证模型 ID 为 `kimi-k3-1`，本轮仅确认模型选择与 M
 2026-10-05 三模型 MCP 测试用户核对首四条 21.65 积分，其中定向 Kimi 任务 18.99；后续三条用量未知，不能推断取消任务免费。详细记录见项目 docs/MCP_TEST.md。
 
 初始化和 health 可跨对话；任务操作仍由一个服务持有记录目录。出现锁冲突时说明限制，不创建另一任务目录规避并发规则，不关闭其他对话服务。
+
+0.1.1 查询终态任务时会在后台刷新清理状态，首次仍可能 pending；稍后查询原 task_id。不会重放任务。WorkBuddy 5.7.7 重开后，启动等待账号模型目录就绪，保护握手有界等待；health 的就绪字段不等于任务完成。更新源码后须完全重启 Codex 并只读确认 bridge_version。
