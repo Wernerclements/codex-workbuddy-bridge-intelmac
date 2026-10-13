@@ -12,6 +12,7 @@ reaper.on('exit', () => { process.exit(3); });
 const directory = process.env.WORKBUDDY_BRIDGE_BOOTSTRAP_DIR;
 let protection, bootstrap, encoded, readyServer;
 let credentialAccepted = false, runtimeReported = false;
+let stage = 'product';
 function announce() {
   if (credentialAccepted && runtimeReported) process.stdout.write('INTELMAC_PROTECTED_RUNTIME_READY\n');
 }
@@ -26,8 +27,8 @@ function dispose() {
   }
   bootstrap = encoded = undefined;
 }
-function fail() { dispose(); process.stderr.write('INTELMAC_CREDENTIAL_BOOTSTRAP_FAILED\n'); process.exit(3); }
-try {
+function fail(reason = stage) { dispose(); process.stderr.write('INTELMAC_CREDENTIAL_BOOTSTRAP_FAILED\nINTELMAC_STAGE_' + reason + '\n'); process.exit(3); }
+function loadProduct() {
   const info = fs.lstatSync(directory);
   if (!info.isDirectory() || info.uid !== process.getuid() || (info.mode & 0o777) !== 0o700) fail();
   // Load the GUI's product snapshot before the CLI freezes its initial model
@@ -41,10 +42,30 @@ try {
     const configuration = JSON.parse(snapshot);
     if (configuration.authentication?.id !== 'workbuddy-desktop'
         || configuration.authentication?.type !== 'cli-external-link') fail();
+    const model = process.env.WORKBUDDY_BRIDGE_MODEL;
+    if (process.env.WORKBUDDY_BRIDGE_APP_VERSION === '5.7.7' && model &&
+        (!Array.isArray(configuration.models) || !configuration.models.some(item => item.id === model)
+         || !Array.isArray(configuration.agents) || !configuration.agents.some(agent =>
+           agent.name === 'cli' && Array.isArray(agent.models) && agent.models.includes(model)))) return false;
     process.env.ACC_PRODUCT_CONFIG_V3 = snapshot;
     delete process.env.ACC_PRODUCT_CONFIG_PATH;
   } finally { fs.closeSync(fd); }
-  protection = require(path.resolve(path.dirname(entry), '../../main/process-cpu-sampler.js'));
+  return true;
+}
+function startRuntime() {
+stage = 'native';
+try {
+  const functions = ['init_dist', 'normalizeAtRestBuildKeyCapabilities', 'keyblobPathFor',
+    'loadOrCreateKeyblobMasterKey', 'encodeAtRestEncryptionBootstrap', 'disposeAtRestEncryptionBootstrap'];
+  const profiles = {'5.6.2': functions, '5.7.7': ['$', '_t', 'tt', 'nt', 'Z', 'X']};
+  const exports = profiles[process.env.WORKBUDDY_BRIDGE_APP_VERSION];
+  if (!exports) fail();
+  const native = require(path.resolve(path.dirname(entry), '../../main/process-cpu-sampler.js'));
+  protection = {};
+  for (let index = 0; index < functions.length; index++) {
+    if (typeof native[exports[index]] !== 'function') fail();
+    protection[functions[index]] = native[exports[index]];
+  }
   protection.init_dist();
   const caps = protection.normalizeAtRestBuildKeyCapabilities(process._linkedBinding('electron_browser_workbuddy_storage').loggerGet());
   bootstrap = {policy: 'fields'};
@@ -59,6 +80,7 @@ try {
   bootstrap.userKey = master.value;
   encoded = protection.encodeAtRestEncryptionBootstrap(bootstrap);
 } catch { fail(); }
+stage = 'handshake';
 const token = crypto.randomBytes(32).toString('hex'), worker = 'codex-intelmac-' + task;
 const readyPath = path.join(directory, 'r.sock'), credentialPath = path.join(directory, 'c.sock');
 setInterval(() => {
@@ -103,10 +125,13 @@ readyServer.listen(readyPath, () => {
     function retry(error) {
       if (settled) return;
       settled = true; socket.destroy();
-      if (connected || !error || !['ENOENT','ECONNREFUSED'].includes(error.code) || Date.now() >= deadline) return fail();
+      if (connected || !error || !['ENOENT','ECONNREFUSED'].includes(error.code) || Date.now() >= deadline) return fail(connected ? 'credential_response' : 'credential_connect');
       setTimeout(deliver, 100);
     }
-    socket.setTimeout(2000, () => retry());
+    // After a GUI restart the application can be busy loading its modules.
+    // Do not abandon an already connected protected handshake after only 2s.
+    // Native receiver validation and the overall connect deadline stay intact.
+    socket.setTimeout(10000, () => retry());
     socket.once('connect', () => {
       connected = true;
       try { const info = fs.lstatSync(credentialPath);
@@ -124,12 +149,26 @@ readyServer.listen(readyPath, () => {
       if (index < 0) return;
       try {
         const ack = JSON.parse(buffer.slice(0, index));
-        if (ack.ok !== true || ack.policy !== 'fields') return fail();
+        if (ack.ok !== true || ack.policy !== 'fields') return fail('credential_ack');
         settled = true; socket.destroy(); dispose(); credentialAccepted = true; announce();
       } catch { fail(); }
     });
   }
   setTimeout(deliver, 0);
   process.argv = [process.execPath, entry, ...args];
-  try { require(entry); } catch { fail(); }
+  stage = 'cli';
+  try { require(entry); } catch { fail('cli_load'); }
 });
+}
+// The GUI first publishes a base catalog while its account overlay loads.
+// Wait before native bootstrap/CLI initialization, never change the requested
+// model or replay a prompt. Only this application process reads the snapshot.
+const productDeadline = Date.now() + 30000;
+function waitProduct() {
+  try {
+    if (loadProduct()) return startRuntime();
+    if (Date.now() >= productDeadline) return fail();
+    setTimeout(waitProduct, 250);
+  } catch { fail(); }
+}
+waitProduct();

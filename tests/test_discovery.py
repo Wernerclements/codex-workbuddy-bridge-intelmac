@@ -159,6 +159,35 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotEqual(caught.exception.kind, "cold_start")
         self.assertNotIn("SYNTHETIC-PRIVATE", str(caught.exception))
 
+    def test_known_idle_sidecar_without_host_allows_cold_start(self):
+        for version in ("5.6.2", "5.7.7"):
+            with self.subTest(version=version), \
+                    patch.object(discovery, "app_info", return_value={"version": version, "intel_binary": True}), \
+                    patch.object(discovery, "find_sockets", return_value=[(self.path, 123)]), \
+                    patch.object(discovery, "rpc", side_effect=[{"version": 6}, [{"sessionId": "idle-runtime"}]]), \
+                    self.assertRaises(discovery.WorkBuddyError) as caught:
+                discovery.discover(for_write=True)
+            self.assertEqual(caught.exception.kind, "cold_start")
+
+    def test_unrecognised_endpoint_or_malformed_list_cannot_be_cold_start(self):
+        for sessions in ([{"sessionId": "unknown-host", "acpEndpoint": "http://127.0.0.1:3456/api/v1/acp"}],
+                         {}, None, ["unexpected"]):
+            with self.subTest(sessions=sessions), \
+                    patch.object(discovery, "app_info", return_value={"version": "5.7.7", "intel_binary": True}), \
+                    patch.object(discovery, "find_sockets", return_value=[(self.path, 123)]), \
+                    patch.object(discovery, "rpc", side_effect=[{"version": 6}, sessions]), \
+                    self.assertRaises(discovery.WorkBuddyError) as caught:
+                discovery.discover(for_write=True)
+            self.assertEqual(caught.exception.kind, "unavailable")
+
+    def test_multiple_idle_sidecars_cannot_be_cold_start(self):
+        with patch.object(discovery, "app_info", return_value={"version": "5.7.7", "intel_binary": True}), \
+                patch.object(discovery, "find_sockets", return_value=[(self.path, 123), (self.path, 456)]), \
+                patch.object(discovery, "rpc", side_effect=[{"version": 6}, [], {"version": 6}, []]), \
+                self.assertRaises(discovery.WorkBuddyError) as caught:
+            discovery.discover(for_write=True)
+        self.assertEqual(caught.exception.kind, "unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

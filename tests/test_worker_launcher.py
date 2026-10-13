@@ -38,6 +38,43 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(audit["inline_product"])
         self.assertTrue(audit["key_erased"])
 
+    def test_new_native_exports_preserve_protected_bootstrap(self):
+        result, audit = self.run_harness("new_exports")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(audit["getter_called"])
+        self.assertIs(audit["create_if_missing"], False)
+        self.assertTrue(audit["payload_valid"])
+        self.assertTrue(audit["marker"])
+        self.assertTrue(audit["key_erased"])
+
+    def test_missing_version_export_or_unknown_profile_never_start_cli(self):
+        for mode in ("new_missing_export", "unknown_version"):
+            with self.subTest(mode=mode):
+                result, audit = self.run_harness(mode)
+                self.assertEqual(result.returncode, 3)
+                self.assertFalse(audit["getter_called"])
+                self.assertFalse(audit["cli_started"])
+                self.assertFalse(audit["marker"])
+
+    def test_account_model_overlay_is_ready_before_native_bootstrap(self):
+        result, audit = self.run_harness("new_delayed_model")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(audit["cli_started"])
+        self.assertTrue(audit["marker"])
+
+    def test_slow_connected_native_ack_is_not_abandoned_after_two_seconds(self):
+        result, audit = self.run_harness("new_delayed_ack")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(audit["payload_valid"])
+        self.assertTrue(audit["marker"])
+        self.assertTrue(audit["key_erased"])
+
+    def test_missing_requested_model_times_out_without_native_bootstrap(self):
+        result, audit = self.run_harness("new_missing_model")
+        self.assertEqual(result.returncode, 3)
+        self.assertFalse(audit["getter_called"])
+        self.assertFalse(audit["cli_started"])
+
     def test_wrong_credential_ack_cannot_report_protected_ready(self):
         result, audit = self.run_harness("wrong_ack")
         self.assertEqual(result.returncode, 3)

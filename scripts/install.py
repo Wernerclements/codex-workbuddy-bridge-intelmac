@@ -10,6 +10,7 @@ from pathlib import Path
 import platform
 import plistlib
 import re
+import runpy
 import shutil
 import stat
 import subprocess
@@ -22,10 +23,13 @@ import uuid
 SERVER = "workbuddy_intelmac"
 MODULE = "workbuddy_bridge_intelmac.server"
 DEFAULT_APP = Path("/Applications/WorkBuddy.app")
-VERIFIED_VERSIONS = {"5.6.2"}
 BEGIN = re.compile(rb"(?m)^# workbuddy-intelmac:begin v1 sep=([012]) sha256=([a-f0-9]{64})\r?\n")
 END = b"# workbuddy-intelmac:end v1"
 ROOT = Path(__file__).resolve().parents[1]
+# Installation starts before the package and its dependencies are available.
+SUPPORTED_VERSIONS = runpy.run_path(
+    str(ROOT / "src/workbuddy_bridge_intelmac/compatibility.py")
+)["SUPPORTED_VERSIONS"]
 
 
 class InstallError(RuntimeError):
@@ -222,7 +226,7 @@ def check_app(app: Path, allow_unverified: bool = False) -> str:
         raise InstallError("无法检查 WorkBuddy 应用及其可执行文件。") from None
     if "x86_64" not in architectures:
         raise InstallError("WorkBuddy 应用不包含 Intel 可执行文件。")
-    if version not in VERIFIED_VERSIONS and not allow_unverified:
+    if version not in SUPPORTED_VERSIONS and not allow_unverified:
         raise InstallError(f"WorkBuddy {version} 尚未验证；需先做兼容诊断，或明确使用 --allow-unverified-version。")
     return version
 

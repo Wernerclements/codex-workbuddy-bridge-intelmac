@@ -142,7 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('--run',action='store_true',help='Run real model tasks using the WorkBuddy account')
     parser.add_argument('--cases',nargs='+',choices=['text','file','bash','cancel','permission'],default=['text','file','cancel','permission'])
     parser.add_argument('--output', type=Path, default=LIVE, help='独立验收记录目录')
-    parser.add_argument('--model', choices=['deepseek-v4.1-flash','glm-5.3-flash'], default='deepseek-v4.1-flash')
+    parser.add_argument('--model', choices=['deepseek-v4.1-flash','glm-5.3-flash','step-5-preview'], default='deepseek-v4.1-flash')
     parser.add_argument('--context-tokens', type=int, choices=[300000,600000,1000000])
     args=parser.parse_args()
     LIVE=args.output.resolve()

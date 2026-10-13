@@ -1,4 +1,4 @@
-"""WorkBuddy 5.6.2 adapter. Use only this bridge's isolated desktop workers."""
+"""Verified WorkBuddy desktop adapter using isolated, owned workers."""
 from __future__ import annotations
 
 import re
@@ -9,6 +9,7 @@ import uuid
 from urllib.parse import unquote
 
 from . import __version__
+from .compatibility import SUPPORTED_VERSIONS
 from .discovery import (WORKER_PREFIX, WorkBuddyError, app_info, auth_status,
                         check_endpoint, discover, find_sockets, rpc)
 from .transport import AcpClient
@@ -18,16 +19,17 @@ from .owned_runtime import OwnedRuntime, gui_identity, recover_owned
 def health() -> dict:
     try:
         desktop = discover()
+        supported = desktop.version in SUPPORTED_VERSIONS
         return {"available": True, "read_only": True, "bridge_version": __version__, "version": desktop.version,
-                "ready_for_task": True, "runtime_ready": True, "execution_mode": "sidecar",
+                "ready_for_task": supported, "runtime_ready": True, "execution_mode": "sidecar",
                 "protocol": desktop.protocol, "authenticated": True,
-                "supported": desktop.version == "5.6.2"}
+                "supported": supported}
     except WorkBuddyError as error:
         if error.kind == "cold_start":
             try:
-                gui_identity()
+                gui = gui_identity()
                 return {"available": True, "ready_for_task": True, "runtime_ready": False,
-                        "read_only": True, "bridge_version": __version__, "version": "5.6.2", "protocol": None,
+                        "read_only": True, "bridge_version": __version__, "version": gui["version"], "protocol": None,
                         "authenticated": None, "supported": True, "execution_mode": "owned_cold_start"}
             except WorkBuddyError:
                 pass
@@ -126,7 +128,7 @@ class WorkBuddyAdapter:
             cold_args = list(worker_args)
             index = cold_args.index("--model")
             del cold_args[index:index + 2]
-            self.owned = OwnedRuntime(self.task_id, self.cwd, cold_args, self.on_event)
+            self.owned = OwnedRuntime(self.task_id, self.cwd, cold_args, self.on_event, model=self.model)
             endpoint, password = self.owned.start(self._cancel)
             self.runtime = dict(self.owned.runtime)
         else:

@@ -4,8 +4,13 @@ const fs = require('fs'), net = require('net'), vm = require('vm');
 const [source, directory, mode] = process.argv.slice(2);
 const realProcess = process, entry = '/synthetic/app.asar/cli/bin/codebuddy';
 const product = require('path').join(directory, 'synthetic-product.json');
-fs.writeFileSync(product, mode === 'malformed_product' ? '{bad json' : JSON.stringify({authentication:
-  {id: mode === 'wrong_product_auth' ? 'external-api' : 'workbuddy-desktop', type: 'cli-external-link'}}), {mode: 0o600});
+function writeProduct(ready) {
+  fs.writeFileSync(product, mode === 'malformed_product' ? '{bad json' : JSON.stringify({authentication:
+    {id: mode === 'wrong_product_auth' ? 'external-api' : 'workbuddy-desktop', type: 'cli-external-link'},
+    models: ready ? [{id:'synthetic-model'}] : [], agents: [{name:'cli', models:ready ? ['synthetic-model'] : []}]}), {mode: 0o600});
+}
+writeProduct(!['new_delayed_model','new_missing_model'].includes(mode));
+if (mode === 'new_delayed_model') setTimeout(() => writeProduct(true), 100);
 const task = '11111111-2222-4333-8444-555555555555';
 const secret = 'SYNTHETIC-PROTECTION-MATERIAL';
 const audit = {cli_started: false, create_if_missing: null, getter_called: false,
@@ -16,7 +21,8 @@ realProcess.on('exit', () => { audit.key_erased = symmetric.key.every(byte => by
   console.log('HARNESS:' + JSON.stringify(audit)); });
 const timer = setTimeout(() => realProcess.exit(9), 4000);
 const mockProcess = {argv: [process.execPath, source, task, String(process.ppid), entry, '--serve'],
-  env: {WORKBUDDY_BRIDGE_BOOTSTRAP_DIR: directory, CODEBUDDY_CONFIG_DIR: '/synthetic/config', ACC_PRODUCT_CONFIG_PATH: product},
+  env: {WORKBUDDY_BRIDGE_BOOTSTRAP_DIR: directory, CODEBUDDY_CONFIG_DIR: '/synthetic/config', ACC_PRODUCT_CONFIG_PATH: product,
+    WORKBUDDY_BRIDGE_APP_VERSION: mode.startsWith('new_') ? '5.7.7' : mode === 'unknown_version' ? '99.0.0' : '5.6.2'},
   pid: process.pid, ppid: process.ppid, execPath: process.execPath,
   getuid: process.getuid.bind(process), kill: process.kill.bind(process),
   stdout: {write(value) { if (value === 'INTELMAC_PROTECTED_RUNTIME_READY\n') audit.marker = true; realProcess.stdout.write(value); }},
@@ -26,6 +32,7 @@ const mockProcess = {argv: [process.execPath, source, task, String(process.ppid)
     if (name !== 'electron_browser_workbuddy_storage') throw new Error('unexpected binding');
     return {loggerGet() { audit.getter_called = true; return 'native-capability-double'; }};
   }};
+if (['new_delayed_model','new_missing_model'].includes(mode)) mockProcess.env.WORKBUDDY_BRIDGE_MODEL = 'synthetic-model';
 const protection = {
   init_dist() {},
   normalizeAtRestBuildKeyCapabilities(raw) {
@@ -65,7 +72,7 @@ function cli() {
       const ack = {ok: true, policy: mode === 'wrong_ack' ? 'disabled' : 'fields'};
       const encoded = JSON.stringify(ack) + '\n';
       socket.write(encoded.slice(0, 3));
-      setTimeout(() => socket.end(encoded.slice(3)), 5);
+      setTimeout(() => socket.end(encoded.slice(3)), mode === 'new_delayed_ack' ? 2200 : 5);
       receiver.close();
     });
   });
@@ -83,7 +90,7 @@ function cli() {
     socket.on('close', () => {
       if (buffer) { const reply = JSON.parse(buffer.split('\n')[0]); audit.ready_ack = reply.id === 17 && reply.result.ok === true; }
       else audit.ready_rejected = true;
-      if (mode !== 'wrong_ack') setTimeout(finish, 100);
+      if (mode !== 'wrong_ack') setTimeout(finish, mode === 'new_delayed_ack' ? 2400 : 100);
     });
   });
 }
@@ -96,9 +103,21 @@ const context = {process: mockProcess, Buffer, Date, setTimeout, setInterval, __
         && Object.keys(options.env).length === 1 && options.env.ELECTRON_RUN_AS_NODE === '1';
       return new (require('events').EventEmitter)();
     }};
-    if (name.endsWith('/main/process-cpu-sampler.js')) return protection;
+    if (name.endsWith('/main/process-cpu-sampler.js')) {
+      if (!mode.startsWith('new_')) return protection;
+      const keys = ['init_dist','normalizeAtRestBuildKeyCapabilities','keyblobPathFor',
+        'loadOrCreateKeyblobMasterKey','encodeAtRestEncryptionBootstrap','disposeAtRestEncryptionBootstrap'];
+      const aliases = ['$', '_t', 'tt', 'nt', 'Z', 'X'];
+      const values = Object.fromEntries(keys.map((key,index) => [aliases[index], protection[key]]));
+      if (mode === 'new_missing_export') delete values.Z;
+      return values;
+    }
     if (name === entry) return cli();
     if (['fs', 'path', 'net', 'crypto'].includes(name)) return require(name);
     throw new Error('unexpected module');
   }};
+if (mode === 'new_missing_model') {
+  let now = 0;
+  context.Date = {now() { now += 10000; return now; }};
+}
 vm.runInNewContext(fs.readFileSync(source, 'utf8'), context, {filename: source});

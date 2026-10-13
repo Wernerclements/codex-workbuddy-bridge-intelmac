@@ -13,7 +13,8 @@ import threading
 import time
 import uuid
 
-from .discovery import APP, WORKER_PREFIX, SUPPORTED_VERSION, WorkBuddyError, app_info, auth_status
+from .discovery import APP, WORKER_PREFIX, WorkBuddyError, app_info, auth_status
+from .compatibility import SUPPORTED_VERSIONS
 
 LAUNCHER = Path(__file__).with_name("worker_launcher.cjs").resolve()
 
@@ -31,7 +32,7 @@ def process_identity(pid: int) -> dict | None:
 
 def gui_identity() -> dict:
     info = app_info()
-    if info["version"] != "5.6.2" or not info["intel_binary"]:
+    if info["version"] not in SUPPORTED_VERSIONS or not info["intel_binary"]:
         raise WorkBuddyError("当前应用版本或架构尚未通过冷启动适配")
     result = subprocess.run(["ps", "-axo", "uid=,pid=,args="],
                             capture_output=True, text=True, timeout=5)
@@ -51,10 +52,12 @@ def gui_identity() -> dict:
             found.append({"pid": int(parts[1]), "start": identity["start"]})
     if len(found) != 1:
         raise WorkBuddyError("冷启动需要唯一的 WorkBuddy 桌面实例；请启动应用并登录")
-    return found[0]
+    return {**found[0], "version": info["version"]}
 
 
-def launch_environment(password: str) -> dict:
+def launch_environment(password: str, *, version: str) -> dict:
+    if version not in SUPPORTED_VERSIONS:
+        raise WorkBuddyError("当前应用版本尚未通过冷启动适配")
     # Inherit ordinary system paths, never ambient model keys, broker leases,
     # credential bootstrap or Node/Electron overrides from the Codex process.
     keys = ("HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE")
@@ -67,14 +70,20 @@ def launch_environment(password: str) -> dict:
                 "CODEBUDDY_GATEWAY_AUTH": "password",
                 "CODEBUDDY_GATEWAY_PASSWORD": password,
                 "CODEBUDDY_GATEWAY_DISABLE_API_DOCS": "1",
+                "WORKBUDDY_BRIDGE_APP_VERSION": version,
                 "CLIENT_INFO_PLATFORM": "WorkBuddy",
-                "CLIENT_INFO_PLATFORM_VERSION": SUPPORTED_VERSION,
+                "CLIENT_INFO_PLATFORM_VERSION": version,
                 "CLIENT_INFO_IDE_TYPE": "WorkBuddy",
                 "CLIENT_INFO_PRODUCT_NAME": "WorkBuddy",
-                "CLIENT_INFO_PRODUCT_VERSION": SUPPORTED_VERSION,
+                "CLIENT_INFO_PRODUCT_VERSION": version,
                 "CLIENT_INFO_PLUGIN_NAME": "workbuddy-desktop",
-                "CLIENT_INFO_PLUGIN_VERSION": SUPPORTED_VERSION,
+                "CLIENT_INFO_PLUGIN_VERSION": version,
                 "CODEBUDDY_HOST": "workbuddy-desktop"})
+    if version == "5.7.7":
+        # The CLI otherwise freezes ACP's initial model catalog from its
+        # older localStorage cache before the GUI product snapshot arrives.
+        # Skip that read for this worker; do not delete or rewrite the cache.
+        env["CODEBUDDY_DISABLE_PRODUCT_CACHE"] = "1"
     # The GUI already maintains this product snapshot. Passing its path avoids
     # an older standalone product/model snapshot during early CLI argument setup.
     # The bridge neither reads its body nor copies or rewrites it.
@@ -276,13 +285,14 @@ def recover_owned(runtime: dict) -> dict:
 
 
 class OwnedRuntime:
-    def __init__(self, task_id: str, cwd: str, args: list[str], on_event):
+    def __init__(self, task_id: str, cwd: str, args: list[str], on_event, *, model: str | None = None):
         self.gui = gui_identity()
         self.runtime = {"launcher": "owned", "task_id": task_id,
                         "worker_id": WORKER_PREFIX + task_id,
                         "gui_pid": self.gui["pid"], "gui_start": self.gui["start"],
-                        "version": "5.6.2"}
+                        "version": self.gui["version"]}
         self.args, self.cwd, self.on_event = args, cwd, on_event
+        self.model = model
         self.password = secrets.token_urlsafe(32)
         self.process = None
         self._buffer = ""
@@ -301,14 +311,27 @@ class OwnedRuntime:
 
     def _watch(self):
         while not self._closed.wait(0.5):
+            gui_verified = True
             try:
                 gui = process_identity(self.gui["pid"])
             except (OSError, subprocess.SubprocessError):
+                # A busy desktop can time out ps while reopening. An
+                # inconclusive probe is not evidence that the GUI exited.
+                # Continue checking the owned child and retry the GUI probe.
+                gui_verified = False
                 gui = None
-            if not gui or gui["start"] != self.gui["start"] or self.process.poll() is not None:
+            child_exited = self.process.poll() is not None
+            if child_exited or (gui_verified and (not gui or gui["start"] != self.gui["start"])):
                 self.lost.set()
+                diagnostics = {"reason": "worker_exited" if child_exited else "gui_changed"}
+                if child_exited:
+                    diagnostics["exit_code"] = self.process.returncode
+                    with self._lock:
+                        stages = re.findall(r"INTELMAC_STAGE_(product|native|handshake|cli|credential_response|credential_connect|credential_ack|cli_load)\n", self._buffer)
+                    if stages:
+                        diagnostics["startup_stage"] = stages[-1]
                 try:
-                    self.on_event({"type": "runtime_lost"})
+                    self.on_event({"type": "runtime_lost", "diagnostics": diagnostics})
                 finally:
                     self.stop()
                 return
@@ -317,6 +340,8 @@ class OwnedRuntime:
         if cancelled.is_set() or self._closed.is_set():
             raise WorkBuddyError("任务已取消")
         info = app_info()
+        if info["version"] != self.runtime["version"] or not info["intel_binary"]:
+            raise WorkBuddyError("应用在任务启动期间已更新或架构改变；任务未发送")
         with self._stop_lock:
             if cancelled.is_set() or self._closed.is_set():
                 raise WorkBuddyError("任务已取消")
@@ -331,7 +356,9 @@ class OwnedRuntime:
             password = self.password
             if not password:
                 raise WorkBuddyError("WorkBuddy 自有运行时启动凭证不可用")
-            environment = launch_environment(password)
+            environment = launch_environment(password, version=self.runtime["version"])
+            if self.model is not None:
+                environment["WORKBUDDY_BRIDGE_MODEL"] = self.model
             if len(os.fsencode(str(Path(self.runtime["startup_dir"]) / "c.sock"))) > 100:
                 raise WorkBuddyError("WorkBuddy 私有启动通道路径过长")
             environment["WORKBUDDY_BRIDGE_BOOTSTRAP_DIR"] = self.runtime["startup_dir"]
@@ -387,6 +414,11 @@ class OwnedRuntime:
                         self.process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         pass
+                # Descendant reaping can finish while wait() collects the
+                # wrapper. Recheck with the same ownership guards before
+                # persisting a stale pending result.
+                if result.get("cleaned") is not True:
+                    result = recover_owned(dict(self.runtime))
                 return result
             finally:
                 self.password = ""

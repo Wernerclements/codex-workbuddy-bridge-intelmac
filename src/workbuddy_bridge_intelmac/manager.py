@@ -136,7 +136,10 @@ class Manager:
         self._tasks = {}
         self._queue = []
         self._adapters = {}
+        self._cleanup_checked = {}
+        self._cleanup_running = set()
         self._shutdown = False
+        self._worker_stopped = False
         for directory in self.state_dir.iterdir():
             if directory.is_symlink() or not directory.is_dir():
                 continue
@@ -244,8 +247,53 @@ class Manager:
             return self._view(task)
 
     def get_task(self, task_id: str):
+        self._refresh_cleanup(task_id)
         with self._condition:
             return self._view(self._task(task_id))
+
+    def _refresh_cleanup(self, task_id: str):
+        """Schedule owned cleanup without blocking queries or replaying requests."""
+        with self._condition:
+            task = self._task(task_id)
+            now = time.monotonic()
+            if (self._shutdown or task["status"] not in TERMINAL or not task.get("cleanup_pending")
+                    or not task.get("runtime") or task_id in self._adapters
+                    or task_id in self._cleanup_running
+                    or now - self._cleanup_checked.get(task_id, float("-inf")) < 2):
+                return
+            self._cleanup_checked[task_id] = now
+            self._cleanup_running.add(task_id)
+            runtime = copy.deepcopy(task["runtime"])
+            try:
+                threading.Thread(target=self._recover_cleanup, args=(task_id, runtime),
+                                 name="workbuddy-cleanup", daemon=True).start()
+            except Exception:
+                self._cleanup_running.discard(task_id)
+                raise
+
+    def _recover_cleanup(self, task_id: str, runtime: dict):
+        try:
+            recovery = _safe_runtime(self._recover(runtime))
+            error_type = None
+        except Exception as error:
+            recovery = {"cleaned": False, "error_type": type(error).__name__}
+            error_type = type(error).__name__
+        with self._condition:
+            try:
+                if self._shutdown:
+                    return
+                task = self._task(task_id)
+                if task["status"] in TERMINAL and task.get("runtime") == runtime:
+                    cleaned = isinstance(recovery, dict) and recovery.get("cleaned") is True
+                    fields = {"recovery": recovery, "cleanup_confirmed": cleaned, "cleanup_pending": not cleaned}
+                    if error_type:
+                        fields["cleanup_error_type"] = error_type
+                    self._change(task, **fields)
+            finally:
+                self._cleanup_running.discard(task_id)
+                self._condition.notify_all()
+                if self._shutdown and self._worker_stopped:
+                    self._release_lock()
 
     def wait_task(self, task_id: str, timeout_seconds: float = 30):
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) \
@@ -262,7 +310,10 @@ class Manager:
             result = self._view(task)
             result["wait_timed_out"] = task["status"] not in TERMINAL \
                 and (task["status"] != "permission_required" or task["cancel_requested"]) and time.monotonic() >= deadline
-            return result
+        if result["status"] in TERMINAL:
+            result = self.get_task(task_id)
+            result["wait_timed_out"] = False
+        return result
 
     def cancel_task(self, task_id: str):
         with self._condition:
@@ -296,6 +347,7 @@ class Manager:
             return self._view(task)
 
     def get_result(self, task_id: str):
+        self._refresh_cleanup(task_id)
         with self._condition:
             task = self._task(task_id)
             if task["status"] not in TERMINAL:
@@ -323,7 +375,16 @@ class Manager:
             if event.get("type") == "runtime_lost":
                 # Wake permission callbacks without granting or treating an unexpected
                 # process loss as a user cancellation. _work owns final persistence.
-                self._change(task, runtime_lost=True, permission_request=None,
+                diagnostics = event.get("diagnostics", {})
+                safe_diagnostics = {}
+                if isinstance(diagnostics, dict):
+                    if diagnostics.get("reason") in {"worker_exited", "gui_changed"}:
+                        safe_diagnostics["reason"] = diagnostics["reason"]
+                    if type(diagnostics.get("exit_code")) is int:
+                        safe_diagnostics["exit_code"] = diagnostics["exit_code"]
+                    if diagnostics.get("startup_stage") in {"product", "native", "handshake", "cli", "credential_response", "credential_connect", "credential_ack", "cli_load"}:
+                        safe_diagnostics["startup_stage"] = diagnostics["startup_stage"]
+                self._change(task, runtime_lost=True, runtime_diagnostics=safe_diagnostics, permission_request=None,
                              status="running" if task["status"] == "permission_required" else task["status"])
             elif event.get("type") == "prompt_accepted":
                 self._change(task, prompt_accepted=True, started_at=time.time())
@@ -397,6 +458,7 @@ class Manager:
                 while not self._queue and not self._shutdown:
                     self._condition.wait()
                 if self._shutdown:
+                    self._worker_stopped = True
                     self._release_lock()
                     return
                 task = self._tasks[self._queue.pop(0)]
@@ -534,7 +596,9 @@ class Manager:
                 self._release_lock()
 
     def _release_lock(self):
-        if self._lock_fd is not None:
+        # An in-flight recovery can still signal owned resources. Keep the
+        # manager lock until it finishes, even after the task worker exits.
+        if self._lock_fd is not None and not self._cleanup_running:
             fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
             os.close(self._lock_fd)
             self._lock_fd = None

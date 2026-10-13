@@ -199,6 +199,7 @@ class ColdStartTests(unittest.TestCase):
             result = instance.run("synthetic prompt")
             cleanup = instance.close()
         args = launch.call_args.args[2]
+        self.assertEqual(launch.call_args.kwargs["model"], "glm-5.3-flash")
         self.assertEqual(args[0], str(info["cli"]))
         self.assertNotIn("--model", args)
         self.assertNotIn("glm-5.3-flash", args)
@@ -273,7 +274,7 @@ class ColdStartTests(unittest.TestCase):
 
     def test_health_is_read_only_and_does_not_claim_cold_account_authentication(self):
         with patch.object(adapter, "discover", side_effect=WorkBuddyError("cold", kind="cold_start")), \
-                patch.object(adapter, "gui_identity", return_value={"pid": 123, "start": "synthetic"}), \
+                patch.object(adapter, "gui_identity", return_value={"pid": 123, "start": "synthetic", "version": "5.7.7"}), \
                 patch.object(adapter, "OwnedRuntime") as launch:
             result = adapter.health()
         self.assertTrue(result["available"])
@@ -283,6 +284,7 @@ class ColdStartTests(unittest.TestCase):
         self.assertIsNone(result["authenticated"])
         self.assertEqual(result["execution_mode"], "owned_cold_start")
         self.assertEqual(result["bridge_version"], adapter.__version__)
+        self.assertEqual(result["version"], "5.7.7")
         launch.assert_not_called()
 
     def test_unavailable_or_unsupported_channel_cannot_fall_back_to_own_launcher(self):
