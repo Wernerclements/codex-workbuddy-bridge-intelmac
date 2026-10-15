@@ -101,6 +101,16 @@ class ManagerTests(unittest.TestCase):
                 lambda: task_id not in manager._cleanup_running, timeout=2),
                 "background cleanup did not finish")
 
+    def close_for_restart(self, manager):
+        manager.close()
+        # close() deliberately retains the instance lock while an already
+        # scheduled recovery finishes. Restart tests must wait for that safe
+        # handoff, rather than race a legitimate lock refusal.
+        with manager._condition:
+            self.assertTrue(manager._condition.wait_for(
+                lambda: manager._lock_fd is None, timeout=2),
+                "closed manager did not finish its guarded cleanup")
+
     def test_wait_timeout_does_not_cancel_or_resubmit_and_tasks_are_serial(self):
         manager, controller = self.manager()
         first = manager.start_task("first", str(self.cwd))["task_id"]
@@ -197,7 +207,7 @@ class ManagerTests(unittest.TestCase):
         self.assertNotIn("NEVER-PERSIST", record.read_text())
         self.assertEqual(stat.S_IMODE(record.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(record.parent.stat().st_mode), 0o700)
-        manager.close()
+        self.close_for_restart(manager)
         restarted, unused = self.manager()
         self.assertEqual(restarted.get_result(task_id)["answer_path"], result["answer_path"])
         self.assertEqual(unused.instances, [])
@@ -224,7 +234,7 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(manager.get_task(task_id)["status"], "running")
         controller.release.set()
         manager.wait_task(task_id, 2)
-        manager.close()
+        self.close_for_restart(manager)
         replacement, unused = self.manager()
         self.assertEqual(replacement.get_task(task_id)["status"], "succeeded")
 
@@ -366,7 +376,7 @@ class ManagerTests(unittest.TestCase):
         ended = manager.start_task("test", str(self.cwd), "request-001")
         self.assertEqual(ended["status"], "succeeded")
         self.assertEqual(len(controller.instances), 1)
-        manager.close()
+        self.close_for_restart(manager)
         restarted, unused = self.manager()
         persisted = restarted.start_task("test", str(self.cwd), "request-001")
         self.assertEqual(persisted["task_id"], first["task_id"])
@@ -451,7 +461,7 @@ class ManagerTests(unittest.TestCase):
                 manager.start_task("test", str(self.cwd), "stable-model", model, context)
         controller.release.set()
         self.assertEqual(manager.wait_task(original["task_id"], 2)["status"], "succeeded")
-        manager.close()
+        self.close_for_restart(manager)
         restarted, unused = self.manager()
         retry = restarted.start_task("test", str(self.cwd), "stable-model", "glm-5.3-flash", 1000000)
         self.assertEqual(retry["task_id"], original["task_id"])
@@ -483,7 +493,7 @@ class ManagerTests(unittest.TestCase):
         record = self.root / "state" / task_id / "task.json"
         self.assertEqual(json.loads(record.read_text())["model"], metadata)
         self.assertNotIn("NEVER-PERSIST-MODEL", record.read_text())
-        manager.close()
+        self.close_for_restart(manager)
         restarted, unused = self.manager()
         self.assertEqual(restarted.get_result(task_id)["model"], metadata)
         self.assertEqual(unused.instances, [])
@@ -582,7 +592,7 @@ class ManagerTests(unittest.TestCase):
         manager, controller = self.manager(Controller(behavior))
         task_id = manager.start_task("test", str(self.cwd))["task_id"]
         self.assertEqual(manager.wait_task(task_id, 2)["status"], "succeeded")
-        manager.close()
+        self.close_for_restart(manager)
         result = manager.get_result(task_id)
         self.assertTrue(result["cleanup_confirmed"])
         self.assertFalse(result["cleanup_pending"])
@@ -599,7 +609,7 @@ class ManagerTests(unittest.TestCase):
         manager, controller = self.manager(Controller(behavior))
         task_id = manager.start_task("test", str(self.cwd))["task_id"]
         self.assertEqual(manager.wait_task(task_id, 2)["status"], "failed")
-        manager.close()
+        self.close_for_restart(manager)
         before = manager.get_result(task_id)
         self.assertTrue(before["cleanup_pending"])
         self.assertFalse(before["cleanup_confirmed"])
@@ -624,7 +634,7 @@ class ManagerTests(unittest.TestCase):
         manager, controller = self.manager(Controller(behavior))
         task_id = manager.start_task("test", str(self.cwd))["task_id"]
         self.assertEqual(manager.wait_task(task_id, 2)["status"], "uncertain")
-        manager.close()
+        self.close_for_restart(manager)
         before = manager.get_result(task_id)
         self.assertTrue(before["cleanup_pending"])
         self.assertEqual(manager.get_task(task_id)["cleanup_error_type"], "OSError")

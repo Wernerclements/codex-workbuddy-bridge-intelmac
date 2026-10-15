@@ -2,7 +2,7 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。旧暖启动任务已核对 2.26 积分；新冷启动路径从用户用量页核对 7 条、2.88 积分，其余已接受请求的消耗尚未确定。
 
-**v0.1.1：适配 WorkBuddy 5.7.7，加入 Step-5-Preview 验收，修复重开时的模型目录竞态、保护握手等待和清理状态刷新。** 详细范围与限制见 [5.7.7 适配记录](docs/WORKBUDDY_5_7_7.md)。本次真实验收使用新代码的独立 MCP 服务；已运行的 Codex MCP 需要完全重启后确认版本。发布状态见仓库 Release。安装说明见 [INSTALL](docs/INSTALL.md)。
+**v0.1.2：适配 WorkBuddy 5.8.2。** 原生模块迁移、账号隔离认证和预热进程识别已修复；三模型、文件/权限/取消、故障以及两种整应用退出恢复验收通过。本机及 Intel macOS / Ubuntu 云端各 259 项回归通过。当前对话已有 MCP 进程需完全重启后确认 0.1.2。详见 [5.8.2 适配记录](docs/WORKBUDDY_5_8_2.md)，发布状态见 Release。
 
 ## 部署后是什么
 
@@ -16,17 +16,19 @@
 
 ## 已验证
 
-- 2019 Intel Mac / macOS 26.5.1，WorkBuddy **5.7.7**；保留历史已验证的 **5.6.2**，5.7.6 及其他版本拒绝任务。
-- GUI 已登录但没有 sidecar 时，Deepseek、GLM、Step 三模型短任务通过；Step 确认 1m 会话预算，历史 5.6.2 双模型也确认过 1m。预算设置不代表百万 token 满载测试。
-- 文件允许一次、明确 Bash 命令允许一次、目录外 Bash 拒绝、流式取消通过，自有资源清理均确认。
-- 历史 5.6.2 新路径的错误本机凭证、worker 失联和 MCP 服务强制结束/重启通过；本次未重跑这些额外故障场景。中断任务 uncertain，不自动重发。
-- 整个 GUI 在流式输出及等待权限时正常退出/重开通过；权限等待解除、未授权文件未生成，旧请求幂等，新自有任务成功，清理确认。
-- 历史 5.6.2 用量页核对新路径 7 条记录共 2.88 积分，使用端为 WorkBuddy；本次 5.7.7 用量未核对。Step 额外取消请求遇到服务端队列满，未进入取消阶段。
-- 自动测试结果见 [测试报告](docs/TEST_REPORT.md)；[云端自动测试](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml) 的结果以对应提交的运行记录为准。
+- 2019 Intel Mac / macOS 26.5.1，WorkBuddy **5.8.2**；保留历史 **5.6.2、5.7.7** 的独立映射，未降级重跑旧版桌面实测。其它版本默认拒绝任务。
+- GUI 已登录但没有 sidecar 时，Deepseek、GLM、Step 三模型短任务通过；Step 确认 1m 会话预算，不代表百万 token 满载输入测试。
+- 文件允许一次、指定 Bash 允许一次、目录外 Bash 拒绝、Deepseek 输出后取消，以及幂等与自有资源清理通过。
+- 错误本机认证、worker 失联、MCP 服务强制中断/重启通过；中断任务 uncertain，不自动重发。
+- 整个 GUI 在执行中、等待权限时正常退出/重开通过；权限等待解除、未授权文件未生成，重开后新任务成功，清理确认。
+- 本轮账号用量未核对；历史用量与 MCP 边界分别见测试报告。
+- 本机及 Intel macOS / Ubuntu 云端各 **259 项自动测试**通过，详见 [测试报告](docs/TEST_REPORT.md) 与 [云端检查](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/workflows/tests.yml)。
 
 只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据；部分 MCP 已实际调用成功，通达信、同花顺和目标法律工具仍未发现。详见 [三模型 MCP 实测](docs/MCP_TEST.md) 和 [验收与差距](docs/AUDIT.md)。
 
 ## 文档
+
+- [5.8.2 适配记录](docs/WORKBUDDY_5_8_2.md)：本次模块、认证、预热进程变化及验收边界。
 
 - [5.7.7 适配记录](docs/WORKBUDDY_5_7_7.md)：本次修复、三模型任务、恢复验收和限制。
 

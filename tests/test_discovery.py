@@ -160,7 +160,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC-PRIVATE", str(caught.exception))
 
     def test_known_idle_sidecar_without_host_allows_cold_start(self):
-        for version in ("5.6.2", "5.7.7"):
+        for version in ("5.6.2", "5.7.7", "5.8.2"):
             with self.subTest(version=version), \
                     patch.object(discovery, "app_info", return_value={"version": version, "intel_binary": True}), \
                     patch.object(discovery, "find_sockets", return_value=[(self.path, 123)]), \

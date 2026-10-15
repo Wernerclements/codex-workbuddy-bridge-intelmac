@@ -45,7 +45,7 @@ def gui_identity() -> dict:
         command = parts[2]
         if command != executable and not command.startswith(executable + " --"):
             continue
-        if any(flag in command for flag in ("--serve", "--type=", "--run-as-node")):
+        if any(flag in command for flag in ("--serve", "--type=", "--run-as-node", "--prewarm")):
             continue
         identity = process_identity(int(parts[1]))
         if identity:
@@ -79,7 +79,7 @@ def launch_environment(password: str, *, version: str) -> dict:
                 "CLIENT_INFO_PLUGIN_NAME": "workbuddy-desktop",
                 "CLIENT_INFO_PLUGIN_VERSION": version,
                 "CODEBUDDY_HOST": "workbuddy-desktop"})
-    if version == "5.7.7":
+    if version in {"5.7.7", "5.8.2"}:
         # The CLI otherwise freezes ACP's initial model catalog from its
         # older localStorage cache before the GUI product snapshot arrives.
         # Skip that read for this worker; do not delete or rewrite the cache.
