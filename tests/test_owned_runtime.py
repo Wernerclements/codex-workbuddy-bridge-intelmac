@@ -79,6 +79,7 @@ class IdentityTests(unittest.TestCase):
                  f"{os.getuid()} 101 {executable} --type=renderer",
                  f"{os.getuid()} 102 {executable} --serve",
                  f"{os.getuid()} 103 {executable} {owned.LAUNCHER} {TASK}",
+                 f"{os.getuid()} 105 {executable} --optimize-for-size --max-semi-space-size=16 /synthetic/cli/bin/codebuddy --prewarm --prewarm-id=synthetic",
                  f"{os.getuid()+1} 104 {executable}"]
         with patch.object(owned, "app_info", return_value={"version": "5.6.2",
                 "intel_binary": True, "executable": executable}), \
@@ -121,10 +122,12 @@ class IdentityTests(unittest.TestCase):
         self.assertNotIn("CODEBUDDY_DISABLE_PRODUCT_CACHE", env)
 
     def test_new_version_environment_is_exact_and_unknown_version_refuses(self):
-        env = owned.launch_environment("synthetic-local-password", version="5.7.7")
-        self.assertEqual(env["CODEBUDDY_DISABLE_PRODUCT_CACHE"], "1")
-        for key in ("CLIENT_INFO_PLATFORM_VERSION", "CLIENT_INFO_PRODUCT_VERSION", "CLIENT_INFO_PLUGIN_VERSION"):
-            self.assertEqual(env[key], "5.7.7")
+        for version in ("5.7.7", "5.8.2"):
+            with self.subTest(version=version):
+                env = owned.launch_environment("synthetic-local-password", version=version)
+                self.assertEqual(env["CODEBUDDY_DISABLE_PRODUCT_CACHE"], "1")
+                for key in ("CLIENT_INFO_PLATFORM_VERSION", "CLIENT_INFO_PRODUCT_VERSION", "CLIENT_INFO_PLUGIN_VERSION"):
+                    self.assertEqual(env[key], version)
         with patch.object(owned.Path, "lstat") as read, self.assertRaises(WorkBuddyError):
             owned.launch_environment("synthetic-local-password", version="99.0.0")
         read.assert_not_called()

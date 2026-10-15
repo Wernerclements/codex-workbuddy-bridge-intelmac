@@ -40,10 +40,13 @@ function loadProduct() {
         || metadata.size <= 0 || metadata.size > 8000000) fail();
     const snapshot = fs.readFileSync(fd, 'utf8');
     const configuration = JSON.parse(snapshot);
-    if (configuration.authentication?.id !== 'workbuddy-desktop'
-        || configuration.authentication?.type !== 'cli-external-link') fail();
+    const authenticationTypes = {'5.6.2': 'cli-external-link', '5.7.7': 'cli-external-link',
+      '5.8.2': 'account-scoped-external-link'};
+    const expectedAuthentication = authenticationTypes[process.env.WORKBUDDY_BRIDGE_APP_VERSION];
+    if (!expectedAuthentication || configuration.authentication?.id !== 'workbuddy-desktop'
+        || configuration.authentication?.type !== expectedAuthentication) fail();
     const model = process.env.WORKBUDDY_BRIDGE_MODEL;
-    if (process.env.WORKBUDDY_BRIDGE_APP_VERSION === '5.7.7' && model &&
+    if (['5.7.7', '5.8.2'].includes(process.env.WORKBUDDY_BRIDGE_APP_VERSION) && model &&
         (!Array.isArray(configuration.models) || !configuration.models.some(item => item.id === model)
          || !Array.isArray(configuration.agents) || !configuration.agents.some(agent =>
            agent.name === 'cli' && Array.isArray(agent.models) && agent.models.includes(model)))) return false;
@@ -57,14 +60,18 @@ stage = 'native';
 try {
   const functions = ['init_dist', 'normalizeAtRestBuildKeyCapabilities', 'keyblobPathFor',
     'loadOrCreateKeyblobMasterKey', 'encodeAtRestEncryptionBootstrap', 'disposeAtRestEncryptionBootstrap'];
-  const profiles = {'5.6.2': functions, '5.7.7': ['$', '_t', 'tt', 'nt', 'Z', 'X']};
-  const exports = profiles[process.env.WORKBUDDY_BRIDGE_APP_VERSION];
-  if (!exports) fail();
-  const native = require(path.resolve(path.dirname(entry), '../../main/process-cpu-sampler.js'));
+  const profiles = {
+    '5.6.2': {module: 'process-cpu-sampler.js', exports: functions},
+    '5.7.7': {module: 'process-cpu-sampler.js', exports: ['$', '_t', 'tt', 'nt', 'Z', 'X']},
+    '5.8.2': {module: 'app-lifetime-job.js', exports: ['T', 'U', 'D', 'O', 'C', 'S']}
+  };
+  const profile = profiles[process.env.WORKBUDDY_BRIDGE_APP_VERSION];
+  if (!profile) fail();
+  const native = require(path.resolve(path.dirname(entry), '../../main', profile.module));
   protection = {};
   for (let index = 0; index < functions.length; index++) {
-    if (typeof native[exports[index]] !== 'function') fail();
-    protection[functions[index]] = native[exports[index]];
+    if (typeof native[profile.exports[index]] !== 'function') fail();
+    protection[functions[index]] = native[profile.exports[index]];
   }
   protection.init_dist();
   const caps = protection.normalizeAtRestBuildKeyCapabilities(process._linkedBinding('electron_browser_workbuddy_storage').loggerGet());

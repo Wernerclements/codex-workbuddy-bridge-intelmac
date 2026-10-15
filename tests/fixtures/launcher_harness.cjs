@@ -6,11 +6,12 @@ const realProcess = process, entry = '/synthetic/app.asar/cli/bin/codebuddy';
 const product = require('path').join(directory, 'synthetic-product.json');
 function writeProduct(ready) {
   fs.writeFileSync(product, mode === 'malformed_product' ? '{bad json' : JSON.stringify({authentication:
-    {id: mode === 'wrong_product_auth' ? 'external-api' : 'workbuddy-desktop', type: 'cli-external-link'},
+    {id: mode === 'wrong_product_auth' ? 'external-api' : 'workbuddy-desktop',
+      type: mode.startsWith('v582_') && mode !== 'v582_wrong_auth_type' ? 'account-scoped-external-link' : 'cli-external-link'},
     models: ready ? [{id:'synthetic-model'}] : [], agents: [{name:'cli', models:ready ? ['synthetic-model'] : []}]}), {mode: 0o600});
 }
-writeProduct(!['new_delayed_model','new_missing_model'].includes(mode));
-if (mode === 'new_delayed_model') setTimeout(() => writeProduct(true), 100);
+writeProduct(!['new_delayed_model','new_missing_model','v582_delayed_model','v582_missing_model'].includes(mode));
+if (['new_delayed_model','v582_delayed_model'].includes(mode)) setTimeout(() => writeProduct(true), 100);
 const task = '11111111-2222-4333-8444-555555555555';
 const secret = 'SYNTHETIC-PROTECTION-MATERIAL';
 const audit = {cli_started: false, create_if_missing: null, getter_called: false,
@@ -22,7 +23,7 @@ realProcess.on('exit', () => { audit.key_erased = symmetric.key.every(byte => by
 const timer = setTimeout(() => realProcess.exit(9), 4000);
 const mockProcess = {argv: [process.execPath, source, task, String(process.ppid), entry, '--serve'],
   env: {WORKBUDDY_BRIDGE_BOOTSTRAP_DIR: directory, CODEBUDDY_CONFIG_DIR: '/synthetic/config', ACC_PRODUCT_CONFIG_PATH: product,
-    WORKBUDDY_BRIDGE_APP_VERSION: mode.startsWith('new_') ? '5.7.7' : mode === 'unknown_version' ? '99.0.0' : '5.6.2'},
+    WORKBUDDY_BRIDGE_APP_VERSION: mode.startsWith('v582_') ? '5.8.2' : mode.startsWith('new_') ? '5.7.7' : mode === 'unknown_version' ? '99.0.0' : '5.6.2'},
   pid: process.pid, ppid: process.ppid, execPath: process.execPath,
   getuid: process.getuid.bind(process), kill: process.kill.bind(process),
   stdout: {write(value) { if (value === 'INTELMAC_PROTECTED_RUNTIME_READY\n') audit.marker = true; realProcess.stdout.write(value); }},
@@ -32,7 +33,7 @@ const mockProcess = {argv: [process.execPath, source, task, String(process.ppid)
     if (name !== 'electron_browser_workbuddy_storage') throw new Error('unexpected binding');
     return {loggerGet() { audit.getter_called = true; return 'native-capability-double'; }};
   }};
-if (['new_delayed_model','new_missing_model'].includes(mode)) mockProcess.env.WORKBUDDY_BRIDGE_MODEL = 'synthetic-model';
+if (['new_delayed_model','new_missing_model','v582_delayed_model','v582_missing_model'].includes(mode)) mockProcess.env.WORKBUDDY_BRIDGE_MODEL = 'synthetic-model';
 const protection = {
   init_dist() {},
   normalizeAtRestBuildKeyCapabilities(raw) {
@@ -103,20 +104,24 @@ const context = {process: mockProcess, Buffer, Date, setTimeout, setInterval, __
         && Object.keys(options.env).length === 1 && options.env.ELECTRON_RUN_AS_NODE === '1';
       return new (require('events').EventEmitter)();
     }};
-    if (name.endsWith('/main/process-cpu-sampler.js')) {
-      if (!mode.startsWith('new_')) return protection;
+    if (name.endsWith('/main/process-cpu-sampler.js') || name.endsWith('/main/app-lifetime-job.js')) {
+      const v582 = mode.startsWith('v582_');
+      if (v582 !== name.endsWith('/main/app-lifetime-job.js')) throw new Error('wrong version module');
+      if (mode === 'v582_missing_module') throw new Error('missing version module');
+      if (!mode.startsWith('new_') && !v582) return protection;
       const keys = ['init_dist','normalizeAtRestBuildKeyCapabilities','keyblobPathFor',
         'loadOrCreateKeyblobMasterKey','encodeAtRestEncryptionBootstrap','disposeAtRestEncryptionBootstrap'];
-      const aliases = ['$', '_t', 'tt', 'nt', 'Z', 'X'];
+      const aliases = v582 ? ['T', 'U', 'D', 'O', 'C', 'S'] : ['$', '_t', 'tt', 'nt', 'Z', 'X'];
       const values = Object.fromEntries(keys.map((key,index) => [aliases[index], protection[key]]));
       if (mode === 'new_missing_export') delete values.Z;
+      if (mode === 'v582_missing_export') delete values.C;
       return values;
     }
     if (name === entry) return cli();
     if (['fs', 'path', 'net', 'crypto'].includes(name)) return require(name);
     throw new Error('unexpected module');
   }};
-if (mode === 'new_missing_model') {
+if (['new_missing_model','v582_missing_model'].includes(mode)) {
   let now = 0;
   context.Date = {now() { now += 10000; return now; }};
 }

@@ -36,7 +36,7 @@ class InstallCompatibilityTests(unittest.TestCase):
 
     def test_supported_versions_pass_real_app_preflight(self):
         with tempfile.TemporaryDirectory() as temporary:
-            for version in ("5.6.2", "5.7.7"):
+            for version in ("5.6.2", "5.7.7", "5.8.2"):
                 app = self.make_app(Path(temporary), version)
                 with self.subTest(version=version), patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=self.intel_commands):
                     self.assertEqual(install.check_app(app), version)
@@ -47,7 +47,7 @@ class InstallCompatibilityTests(unittest.TestCase):
             config = root / "config.toml"
             original = b'model="keep"\n'
             config.write_bytes(original)
-            for version in ("5.7.6", "99.0.0"):
+            for version in ("5.7.6", "5.8.1", "5.8.3", "99.0.0"):
                 app = self.make_app(root, version)
                 with self.subTest(version=version), patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=self.intel_commands), patch.object(install, "find_python") as python, patch.object(install, "install_environment") as environment, patch.object(install, "write_config") as write, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                     self.assertEqual(install.main(["--app", str(app), "--config", str(config), "--venv", str(root / "venv")]), 1)
@@ -59,9 +59,15 @@ class InstallCompatibilityTests(unittest.TestCase):
                 self.assertEqual(list(root.glob("*.bak")), [])
 
     def test_577_install_preserves_config_and_creates_exact_backup(self):
+        self.assert_install_preserves_config("5.7.7")
+
+    def test_582_install_preserves_config_and_creates_exact_backup(self):
+        self.assert_install_preserves_config("5.8.2")
+
+    def assert_install_preserves_config(self, version: str):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            app = self.make_app(root, "5.7.7")
+            app = self.make_app(root, version)
             config = root / "config.toml"
             environment = root / "venv"
             original = b'model="keep"\n'
@@ -79,7 +85,7 @@ class InstallCompatibilityTests(unittest.TestCase):
 
     def test_supported_version_does_not_bypass_rosetta_rejection(self):
         with tempfile.TemporaryDirectory() as temporary:
-            app = self.make_app(Path(temporary), "5.7.7")
+            app = self.make_app(Path(temporary), "5.8.2")
             with patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="1\n")) as run:
                 with self.assertRaisesRegex(install.InstallError, "Apple Silicon/Rosetta"):
                     install.check_app(app)
@@ -87,7 +93,7 @@ class InstallCompatibilityTests(unittest.TestCase):
 
     def test_supported_version_requires_intel_app_binary(self):
         with tempfile.TemporaryDirectory() as temporary:
-            app = self.make_app(Path(temporary), "5.7.7")
+            app = self.make_app(Path(temporary), "5.8.2")
             results = [subprocess.CompletedProcess([], 0, stdout="0\n"), subprocess.CompletedProcess([], 0, stdout="arm64\n")]
             with patch.object(install.platform, "system", return_value="Darwin"), patch.object(install.platform, "machine", return_value="x86_64"), patch.object(install.subprocess, "run", side_effect=results):
                 with self.assertRaisesRegex(install.InstallError, "Intel 可执行文件"):
@@ -98,7 +104,7 @@ class InstallCompatibilityTests(unittest.TestCase):
         code = (
             "import runpy, sys; "
             "installer = runpy.run_path(sys.argv[1]); "
-            "assert installer['SUPPORTED_VERSIONS'] == frozenset({'5.6.2', '5.7.7'}); "
+            "assert installer['SUPPORTED_VERSIONS'] == frozenset({'5.6.2', '5.7.7', '5.8.2'}); "
             "assert not any(name.startswith('workbuddy_bridge_intelmac') for name in sys.modules)"
         )
         result = subprocess.run(

@@ -1,7 +1,7 @@
 # 开发约定
 
 - 项目名使用 `codex-workbuddy-bridge-intelmac`，面向 Intel Mac。
-- 当前源码版本 v0.1.1，支持历史已验证 5.6.2 与本机 5.7.7。5.7.7 三模型短任务、Step 1m、Write/Bash 权限、拒绝、Deepseek 取消和两种整 GUI 恢复通过；本机 257 项自动测试通过。本轮费用未核对，Codex 原生 MCP 待完全重启确认；云端与发布以对应提交检查/Release 为准。详见 docs/WORKBUDDY_5_7_7.md。
+- 当前源码 v0.1.2 候选，支持列表含历史 5.6.2、5.7.7 与本机 5.8.2。5.8.2 七项核心实测、三项故障实测和本机 259 项回归通过；整 GUI 退出恢复等待用户确认空闲，云端及发布待完成。本轮费用未核对，Codex 原生 0.1.2 待重启确认。详见 docs/WORKBUDDY_5_8_2.md。
 - 2026-10-05 当前对话原生 health 确认 0.1.0。三模型真实 MCP：Deepseek/GLM 的 scansci-pdf 健康检查成功返回；三者 sheetagent 解析遇到本机编辑服务拒绝连接。Kimi 默认文档请求执行前停止；目标三连接器未发现。新增用量首四条 21.65 积分、后续三条未知。首次 Deepseek 取消清理记录仍 pending，独立自有恢复已确认物理清理；不得把它称为自动同步。详见 docs/MCP_TEST.md。
 - health 保持只读；ready_for_task 与 runtime_ready、authenticated 分开报告，冷启动 authenticated=null 不代表认证失败。
 - 原生保护材料仅在应用内置运行时和临时私有 socket 握手中使用，不流入 Python、日志、任务记录或文档。保留字段加密，应用密钥辅助函数 createIfMissing=false；产品缓存只读投影，未知版本拒绝任务。

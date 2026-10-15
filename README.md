@@ -2,6 +2,8 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。旧暖启动任务已核对 2.26 积分；新冷启动路径从用户用量页核对 7 条、2.88 积分，其余已接受请求的消耗尚未确定。
 
+**当前分支：v0.1.2 / WorkBuddy 5.8.2 适配。** 原生模块迁移、账号隔离认证和预热进程识别已修复；三模型、文件/权限/取消及三项故障实测通过，本机 259 项回归通过。整应用退出恢复仍等待用户确认空闲，正式发布尚未完成。详见 [5.8.2 适配记录](docs/WORKBUDDY_5_8_2.md)。
+
 **v0.1.1：适配 WorkBuddy 5.7.7，加入 Step-5-Preview 验收，修复重开时的模型目录竞态、保护握手等待和清理状态刷新。** 详细范围与限制见 [5.7.7 适配记录](docs/WORKBUDDY_5_7_7.md)。本次真实验收使用新代码的独立 MCP 服务；已运行的 Codex MCP 需要完全重启后确认版本。发布状态见仓库 Release。安装说明见 [INSTALL](docs/INSTALL.md)。
 
 ## 部署后是什么
@@ -14,7 +16,7 @@
 
 执行通道使用 WorkBuddy 应用内置运行时与本机 ACP。内部 sidecar 已运行时使用该通道；没有 sidecar 时，在任务启动时创建本项目自有 worker。用户在 Codex.app 中操作，旧任务用量页的使用端显示 CLI。冷启动设计见 [COLD_START](docs/COLD_START.md)。
 
-## 已验证
+## v0.1.1 已验证
 
 - 2019 Intel Mac / macOS 26.5.1，WorkBuddy **5.7.7**；保留历史已验证的 **5.6.2**，5.7.6 及其他版本拒绝任务。
 - GUI 已登录但没有 sidecar 时，Deepseek、GLM、Step 三模型短任务通过；Step 确认 1m 会话预算，历史 5.6.2 双模型也确认过 1m。预算设置不代表百万 token 满载测试。
@@ -27,6 +29,8 @@
 只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据；部分 MCP 已实际调用成功，通达信、同花顺和目标法律工具仍未发现。详见 [三模型 MCP 实测](docs/MCP_TEST.md) 和 [验收与差距](docs/AUDIT.md)。
 
 ## 文档
+
+- [5.8.2 适配记录](docs/WORKBUDDY_5_8_2.md)：本次模块、认证、预热进程变化及验收边界。
 
 - [5.7.7 适配记录](docs/WORKBUDDY_5_7_7.md)：本次修复、三模型任务、恢复验收和限制。
 
