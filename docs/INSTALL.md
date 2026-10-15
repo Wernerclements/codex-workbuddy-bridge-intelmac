@@ -1,12 +1,12 @@
 # 安装与卸载
 
-项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前分支说明对应 v0.1.2 候选（正式发布状态见 Release），实际发布状态以仓库 Release 为准。
+项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前说明对应 v0.1.2，实际发布状态以仓库 Release 为准。
 
 ## 环境要求
 
 - 原生 Intel Mac（`x86_64`），不以 Rosetta 环境代替 Intel 验收。
 - 已有 Intel Python **3.12 或以上**；优先使用 3.12，不自动下载大型运行时。
-- `/Applications/WorkBuddy.app`，当前分支适配 **5.6.2、5.7.7、5.8.2**（5.7.6 未完成验收）。安装前先核对仓库的兼容表和真实测试报告。
+- `/Applications/WorkBuddy.app`，适配 **5.6.2、5.7.7、5.8.2**（5.7.6 未完成验收）。安装前先核对仓库的兼容表和真实测试报告。
 - 已安装 Codex.app；安装器默认使用 `CODEX_HOME/config.toml`，未设置时使用 `~/.codex/config.toml`。
 
 安装器检查平台、Python 架构、应用版本和应用的 Intel 可执行文件。版本检查只表示符合适配基线，真实任务能力以测试报告为准。未知 WorkBuddy 版本默认拒绝安装；开发者完成诊断后可显式使用 `--allow-unverified-version`，该选项不代表版本已获得支持。
