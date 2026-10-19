@@ -41,12 +41,12 @@ function loadProduct() {
     const snapshot = fs.readFileSync(fd, 'utf8');
     const configuration = JSON.parse(snapshot);
     const authenticationTypes = {'5.6.2': 'cli-external-link', '5.7.7': 'cli-external-link',
-      '5.8.2': 'account-scoped-external-link'};
+      '5.8.2': 'account-scoped-external-link', '5.8.3': 'account-scoped-external-link'};
     const expectedAuthentication = authenticationTypes[process.env.WORKBUDDY_BRIDGE_APP_VERSION];
     if (!expectedAuthentication || configuration.authentication?.id !== 'workbuddy-desktop'
         || configuration.authentication?.type !== expectedAuthentication) fail();
     const model = process.env.WORKBUDDY_BRIDGE_MODEL;
-    if (['5.7.7', '5.8.2'].includes(process.env.WORKBUDDY_BRIDGE_APP_VERSION) && model &&
+    if (['5.7.7', '5.8.2', '5.8.3'].includes(process.env.WORKBUDDY_BRIDGE_APP_VERSION) && model &&
         (!Array.isArray(configuration.models) || !configuration.models.some(item => item.id === model)
          || !Array.isArray(configuration.agents) || !configuration.agents.some(agent =>
            agent.name === 'cli' && Array.isArray(agent.models) && agent.models.includes(model)))) return false;
@@ -63,7 +63,8 @@ try {
   const profiles = {
     '5.6.2': {module: 'process-cpu-sampler.js', exports: functions},
     '5.7.7': {module: 'process-cpu-sampler.js', exports: ['$', '_t', 'tt', 'nt', 'Z', 'X']},
-    '5.8.2': {module: 'app-lifetime-job.js', exports: ['T', 'U', 'D', 'O', 'C', 'S']}
+    '5.8.2': {module: 'app-lifetime-job.js', exports: ['T', 'U', 'D', 'O', 'C', 'S']},
+    '5.8.3': {module: 'app-lifetime-job.js', exports: ['D', 'G', 'k', 'A', 'T', 'w']}
   };
   const profile = profiles[process.env.WORKBUDDY_BRIDGE_APP_VERSION];
   if (!profile) fail();

@@ -48,7 +48,8 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(audit["key_erased"])
 
     def test_missing_version_export_or_unknown_profile_never_start_cli(self):
-        for mode in ("new_missing_export", "unknown_version", "v582_missing_export", "v582_missing_module"):
+        for mode in ("new_missing_export", "unknown_version", "v584_unknown_version", "v582_missing_export", "v582_missing_module",
+                     "v583_missing_export", "v583_missing_module"):
             with self.subTest(mode=mode):
                 result, audit = self.run_harness(mode)
                 self.assertEqual(result.returncode, 3)
@@ -65,8 +66,26 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(audit["marker"])
         self.assertTrue(audit["key_erased"])
 
+    def test_583_relocated_native_module_preserves_protected_bootstrap(self):
+        result, audit = self.run_harness("v583_exports")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(audit["getter_called"])
+        self.assertIs(audit["create_if_missing"], False)
+        self.assertTrue(audit["payload_valid"])
+        self.assertTrue(audit["marker"])
+        self.assertTrue(audit["key_erased"])
+
+    def test_583_every_native_export_must_be_a_function(self):
+        for index in range(6):
+            with self.subTest(index=index):
+                result, audit = self.run_harness(f"v583_non_function_export_{index}")
+                self.assertEqual(result.returncode, 3)
+                self.assertFalse(audit["getter_called"])
+                self.assertFalse(audit["cli_started"])
+                self.assertFalse(audit["marker"])
+
     def test_account_model_overlay_is_ready_before_native_bootstrap(self):
-        for mode in ("new_delayed_model", "v582_delayed_model"):
+        for mode in ("new_delayed_model", "v582_delayed_model", "v583_delayed_model"):
             with self.subTest(mode=mode):
                 result, audit = self.run_harness(mode)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -74,14 +93,16 @@ class LauncherTests(unittest.TestCase):
                 self.assertTrue(audit["marker"])
 
     def test_slow_connected_native_ack_is_not_abandoned_after_two_seconds(self):
-        result, audit = self.run_harness("new_delayed_ack")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(audit["payload_valid"])
-        self.assertTrue(audit["marker"])
-        self.assertTrue(audit["key_erased"])
+        for mode in ("new_delayed_ack", "v582_delayed_ack", "v583_delayed_ack"):
+            with self.subTest(mode=mode):
+                result, audit = self.run_harness(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(audit["payload_valid"])
+                self.assertTrue(audit["marker"])
+                self.assertTrue(audit["key_erased"])
 
     def test_missing_requested_model_times_out_without_native_bootstrap(self):
-        for mode in ("new_missing_model", "v582_missing_model"):
+        for mode in ("new_missing_model", "v582_missing_model", "v583_missing_model"):
             with self.subTest(mode=mode):
                 result, audit = self.run_harness(mode)
                 self.assertEqual(result.returncode, 3)
@@ -96,7 +117,7 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("INTELMAC_CREDENTIAL_BOOTSTRAP_FAILED", result.stderr)
 
     def test_invalid_product_snapshot_does_not_start_cli(self):
-        for mode in ["malformed_product", "wrong_product_auth", "v582_wrong_auth_type"]:
+        for mode in ["malformed_product", "wrong_product_auth", "v582_wrong_auth_type", "v583_wrong_auth_type"]:
             with self.subTest(mode=mode):
                 result, audit = self.run_harness(mode)
                 self.assertEqual(result.returncode, 3)

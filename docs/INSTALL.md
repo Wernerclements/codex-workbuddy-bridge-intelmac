@@ -1,13 +1,15 @@
 # 安装与卸载
 
-项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前说明对应 v0.1.2，实际发布状态以仓库 Release 为准。
+项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前源码及本机安装对应 v0.1.3；WorkBuddy 5.8.3 已完成本机验收。正式 Release 尚待审核与发布。
 
 ## 环境要求
 
 - 原生 Intel Mac（`x86_64`），不以 Rosetta 环境代替 Intel 验收。
 - 已有 Intel Python **3.12 或以上**；优先使用 3.12，不自动下载大型运行时。
-- `/Applications/WorkBuddy.app`，适配 **5.6.2、5.7.7、5.8.2**（5.7.6 未完成验收）。安装前先核对仓库的兼容表和真实测试报告。
+- `/Applications/WorkBuddy.app`，适配 **5.6.2、5.7.7、5.8.2、5.8.3**（5.7.6 未完成验收）。安装前先核对仓库的兼容表和真实测试报告。
 - 已安装 Codex.app；安装器默认使用 `CODEX_HOME/config.toml`，未设置时使用 `~/.codex/config.toml`。
+
+2026-10-19 的 v0.1.3 安装核对：dry-run 与后续 dry-run 均报告无配置冲突；实际安装完成，`pip check` 无依赖问题，安装分发包和模块元数据均为 0.1.3。安装环境中新启动的 stdio 服务只读 `health` 返回 WorkBuddy 5.8.3、`bridge_version=0.1.3`、`ready_for_task=true`；该调用没有提交任务。当前对话原生 health 仍报告 0.1.2；发布后须完全重启 Codex，再只读确认原生服务加载 0.1.3。详细验收见 [5.8.3 适配记录](WORKBUDDY_5_8_3.md)。
 
 安装器检查平台、Python 架构、应用版本和应用的 Intel 可执行文件。版本检查只表示符合适配基线，真实任务能力以测试报告为准。未知 WorkBuddy 版本默认拒绝安装；开发者完成诊断后可显式使用 `--allow-unverified-version`，该选项不代表版本已获得支持。
 
@@ -51,7 +53,7 @@ python3 scripts/install.py --allow-source-build
 
 该选项只允许依赖安装从源码构建，不代为安装编译工具。编译还可能需要兼容的 OpenSSL 开发文件；现有工具链是否能完成编译，以实际依赖安装结果为准。安装失败可以在修复环境后重复执行，已创建的自有环境会保留。
 
-**v0.1.2 冷启动：** 不要求 sidecar/CLI Host 事先运行。已登录 GUI 的唯一实例存在时，实际任务可创建自己的应用内置运行时。原生受保护字段握手与产品配置缓存必须可用；未知应用版本、缺失保护材料或不安全的缓存文件会明确失败。无需另配模型 API 或手工导出登录凭证。设计和维护说明见 [冷启动设计](COLD_START.md)。
+**v0.1.3 / WorkBuddy 5.8.3：** 不要求 sidecar/CLI Host 事先运行。已登录 GUI 的唯一实例存在时，实际任务可创建自己的应用内置运行时。原生受保护字段握手与产品配置缓存必须可用；未知应用版本、缺失保护材料或不安全的缓存文件会明确失败。无需另配模型 API 或手工导出登录凭证。设计和维护说明见 [冷启动设计](COLD_START.md)。
 
 安装完成后，在 Codex 中重新加载 MCP 服务；若当前版本没有独立的重新加载入口，重启 Codex.app。先调用桥接器的 `health` 查看状态，再在独立目录执行一个小型验收任务。
 
