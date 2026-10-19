@@ -2,7 +2,7 @@
 
 ## 2026-10-19 · v0.1.3 / WorkBuddy 5.8.3 当前进度
 
-5.8.3 版本适配、7 项 core、3 项故障、执行中与权限等待中两轮整 GUI 退出恢复均在本机通过；229 项项目测试 + 34 项上游回归通过。本轮没有跑云端 CI。Step 1m 只确认会话预算与短任务回显，不是百万 token 满载。
+5.8.3 版本适配、7 项 core、3 项故障、执行中与权限等待中两轮整 GUI 退出恢复均在本机通过；229 项项目测试 + 34 项上游回归通过；PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。Step 1m 只确认会话预算与短任务回显，不是百万 token 满载。
 
 当前安装器 dry-run 与实际安装、pip check、安装环境独立 stdio health 已通过并核对版本 0.1.3；当前对话原生 health 仍报告 0.1.2；发布后须完全重启 Codex 并只读确认 0.1.3。#5 和 #11 继续开放，费用及 MCP 业务调用未核对，旧版未降级重测。当前进入提交、推送与 PR 审核/CI 阶段；合并和 Release 仍待主代理放行。
 

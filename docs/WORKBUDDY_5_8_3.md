@@ -2,7 +2,7 @@
 
 记录日期：2026-10-19。对象：Intel Mac、WorkBuddy **5.8.3**、桥接 **0.1.3**。
 
-**状态：本机适配与真实验收通过，0.1.3 已安装并通过独立 stdio health。** 本机自动回归为 229 项项目测试 + 34 项上游回归，共 263 项，无跳过；本轮没有运行云端 CI，不能用 5.8.2 的旧云端结果代表 5.8.3。本机验收已完成，分支进入 PR 审核与 CI 阶段；尚未合并或 Release。
+**状态：本机适配与真实验收通过，0.1.3 已安装并通过独立 stdio health。** 本机自动回归为 229 项项目测试 + 34 项上游回归，共 263 项，无跳过；PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。不以 5.8.2 的旧 CI 结果代替本轮结果。本机验收已完成；PR #19 的 Intel macOS / Ubuntu 检查通过，待审核；尚未合并或 Release。
 
 ## 版本适配核对
 
@@ -49,8 +49,8 @@
 - 源码、安装分发包与导入模块版本均为 `0.1.3`；安装器 dry-run 确认 Codex 配置无冲突，实际安装完成，`pip check` 显示无依赖问题。
 - 从安装环境启动的新 stdio 服务返回 `bridge_version=0.1.3`、WorkBuddy `5.8.3`、`available=true`、`ready_for_task=true`、`runtime_ready=false`、`authenticated=null`。该 health 没有提交任务；没有 sidecar 时 `protocol=null` 是预期状态。主代理对当前对话原生 MCP 的只读 health 仍报告 `bridge_version=0.1.2`，WorkBuddy `5.8.3`，available/ready/supported=true，runtime_ready=false、authenticated=null，也未提交任务。发布后须完全重启 Codex，再只读确认原生 `bridge_version=0.1.3`。
 - 安装后只读进程检查确认唯一 WorkBuddy 5.8.3 GUI 身份正常，未发现自有 worker 或 reaper 残留。
-- 229 项项目测试与 34 项上游回归均在本机通过，无跳过；本轮云端未运行。
+- 229 项项目测试与 34 项上游回归均在本机通过，无跳过；PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。
 
 ## 边界
 
-本轮没有核对模型账号用量或费用，没有重跑其他 WorkBuddy 桌面 MCP 业务调用；#5（桌面连接器继承）和 #11（权限请求详情）仍开放。Step 1m 是会话预算设置和短任务的回显，不是百万 token 长输入测试。旧版本没有降级重测。Raw reports、模型正文和应用内部材料只留在忽略的本机 `.local/update-583/`，不提交、不上传。安装、health 与清理摘要保存在忽略目录 `.local/update-583/`。正式 Release 状态待后续审核与发布。
+本轮没有核对模型账号用量或费用，没有重跑其他 WorkBuddy 桌面 MCP 业务调用；#5（桌面连接器继承）和 #11（权限请求详情）仍开放。Step 1m 是会话预算设置和短任务的回显，不是百万 token 长输入测试。旧版本没有降级重测。Raw reports、模型正文和应用内部材料只留在忽略的本机 `.local/update-583/`，不提交、不上传。安装、health 与清理摘要保存在忽略目录 `.local/update-583/`。正式发布状态见 Release；当前尚未合并或发布。

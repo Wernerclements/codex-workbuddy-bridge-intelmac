@@ -75,4 +75,4 @@ alpha.3 已完成双模型、文件/Bash 权限、目录外拒绝、流式取消
 
 本轮为 5.8.3 增加版本专属的六个原生保护导出映射；认证形状与 5.8.2 相同，sidecar 协议为 6，host 识别、ready 字段、受保护凭证流程、缓存投影、模型目录等待和 `--prewarm` 进程边界均复核无阻断。应用保护材料仍只在内置运行时处理，未知版本拒绝任务。
 
-7 项 core、3 项故障、执行中及权限等待中整 GUI 正常退出/重开与新自有 worker 恢复均通过；同一 request ID 不重发，清理确认。错误认证由隔离 cookie jar 的无 prompt 自有 runtime 检查确认，未修改生产认证代码。Step 的 1m 会话预算和短文本任务不证明百万 token 满载能力。本机 263 项回归通过，本轮云端未运行。费用、MCP 业务调用与旧版降级复测均未覆盖。当前对话原生 health 仍报告 0.1.2；发布后须完全重启 Codex 并只读确认 0.1.3。详情见 [5.8.3 适配记录](WORKBUDDY_5_8_3.md)。
+7 项 core、3 项故障、执行中及权限等待中整 GUI 正常退出/重开与新自有 worker 恢复均通过；同一 request ID 不重发，清理确认。错误认证由隔离 cookie jar 的无 prompt 自有 runtime 检查确认，未修改生产认证代码。Step 的 1m 会话预算和短文本任务不证明百万 token 满载能力。本机 263 项回归通过；PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。费用、MCP 业务调用与旧版降级复测均未覆盖。当前对话原生 health 仍报告 0.1.2；发布后须完全重启 Codex 并只读确认 0.1.3。详情见 [5.8.3 适配记录](WORKBUDDY_5_8_3.md)。

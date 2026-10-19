@@ -2,7 +2,7 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。早期版本用量记录已分别核对 2.26 与 2.88 积分；v0.1.3 的费用尚未核对。
 
-**v0.1.3：适配 WorkBuddy 5.8.3。** 本机 229 项项目测试 + 34 项上游回归（共 263 项）通过；三模型、权限、取消、故障与两种整 GUI 退出恢复均通过。已安装并通过独立 stdio health；当前对话原生 MCP health 仍报告 0.1.2，尚未加载 0.1.3。本轮没有运行云端 CI，也没有核对费用。发布后须完全重启 Codex，再只读确认原生 `bridge_version=0.1.3`。详情见 [5.8.3 适配记录](docs/WORKBUDDY_5_8_3.md)，Release 尚待后续发布。
+**v0.1.3：适配 WorkBuddy 5.8.3。** 本机 229 项项目测试 + 34 项上游回归（共 263 项）通过；三模型、权限、取消、故障与两种整 GUI 退出恢复均通过。已安装并通过独立 stdio health；当前对话原生 MCP health 仍报告 0.1.2，尚未加载 0.1.3。PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。费用仍未核对。发布后须完全重启 Codex，再只读确认原生 `bridge_version=0.1.3`。详情见 [5.8.3 适配记录](docs/WORKBUDDY_5_8_3.md)，Release 尚待后续发布。
 
 ## 部署后是什么
 
@@ -22,7 +22,7 @@
 - 错误本机认证、worker 失联、MCP 服务强制中断/重启通过；中断任务 uncertain，不自动重发。
 - 整个 GUI 在执行中、等待权限时正常退出/重开通过；权限等待解除、未授权文件未生成，重开后新任务成功，清理确认。
 - 本轮账号用量未核对；历史用量与 MCP 边界分别见测试报告。
-- 本机 **263 项自动测试**通过（229 项项目测试 + 34 项上游回归）；本轮云端没有运行。历史云端结果见旧版记录；不要将其当成本轮 5.8.3 检查。详见 [测试报告](docs/TEST_REPORT.md)。
+- 本机 **263 项自动测试**通过（229 项项目测试 + 34 项上游回归）；本轮 PR CI 在 Intel macOS 与 Ubuntu 均通过；历史版本 CI 不作本轮依据。详见 [测试报告](docs/TEST_REPORT.md)。
 
 只读 `health` 不启动任务。冷启动时 `ready_for_task=true`、`runtime_ready=false`、`authenticated=null` 表示具备启动条件且认证尚未验证；不应当成连接失败。实际任务成功后再确认执行与认证。现有用户 Skill 有加载证据；部分 MCP 已实际调用成功，通达信、同花顺和目标法律工具仍未发现。详见 [三模型 MCP 实测](docs/MCP_TEST.md) 和 [验收与差距](docs/AUDIT.md)。
 
