@@ -2,7 +2,7 @@
 
 让 Codex.app 向本机 WorkBuddy 桌面应用分配任务，并收回结果。使用 WorkBuddy 的应用内置运行时与现有受保护登录配置。早期版本用量记录已分别核对 2.26 与 2.88 积分；v0.1.3 的费用尚未核对。
 
-**v0.1.3：适配 WorkBuddy 5.8.3。** 本机 229 项项目测试 + 34 项上游回归（共 263 项）通过；三模型、权限、取消、故障与两种整 GUI 退出恢复均通过。已安装并通过独立 stdio health；当前对话原生 MCP health 仍报告 0.1.2，尚未加载 0.1.3。PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。费用仍未核对。发布后须完全重启 Codex，再只读确认原生 `bridge_version=0.1.3`。详情见 [5.8.3 适配记录](docs/WORKBUDDY_5_8_3.md)，Release 尚待后续发布。
+**v0.1.3：适配 WorkBuddy 5.8.3。** 本机 229 项项目测试 + 34 项上游回归（共 263 项）通过；三模型、权限、取消、故障与两种整 GUI 退出恢复均通过。已安装并通过独立 stdio health；当前对话原生 MCP health 仍报告 0.1.2，尚未加载 0.1.3。PR #19 的 [GitHub Actions run 39196435274](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196435274) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。费用仍未核对。发布后须完全重启 Codex，再只读确认原生 `bridge_version=0.1.3`。详情见 [5.8.3 适配记录](docs/WORKBUDDY_5_8_3.md)，正式发布状态以仓库 Release 为准。
 
 ## 部署后是什么
 

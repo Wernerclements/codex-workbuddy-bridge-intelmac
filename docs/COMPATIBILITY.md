@@ -1,10 +1,10 @@
 # 版本兼容
 
-更新：2026-10-19。本表记录 `v0.1.3` 与已验收历史版本的范围；正式状态以 Release 为准；当前尚未发布。历史用量与本轮费用边界见 [MCP 实测](MCP_TEST.md) 和 [测试报告](TEST_REPORT.md)。
+更新：2026-10-19。本表记录 `v0.1.3` 与已验收历史版本的范围；正式状态以仓库 Release 为准。历史用量与本轮费用边界见 [MCP 实测](MCP_TEST.md) 和 [测试报告](TEST_REPORT.md)。
 
 | 环境 | 应用版本 | 验证情况 | 可部署完整桥接器 |
 | --- | --- | --- | --- |
-| Intel Mac，macOS 26.5.1 | WorkBuddy 5.8.3，x86_64 | 七项核心、三项故障、两轮整 GUI 正常退出/重开、本机263项回归通过；PR #19 CI 在 Intel macOS 与 Ubuntu 各263项通过 | v0.1.3，本机已安装并由独立 stdio health 确认；当前对话原生 health 仍报告 0.1.2，需发布后重启 Codex 再确认 0.1.3；尚未 Release。费用未核对，见 [适配记录](WORKBUDDY_5_8_3.md) |
+| Intel Mac，macOS 26.5.1 | WorkBuddy 5.8.3，x86_64 | 七项核心、三项故障、两轮整 GUI 正常退出/重开、本机263项回归通过；PR #19 CI 在 Intel macOS 与 Ubuntu 各263项通过 | v0.1.3，本机已安装并由独立 stdio health 确认；当前对话原生 health 仍报告 0.1.2，需发布后重启 Codex 再确认 0.1.3；正式状态见 Release。费用未核对，见 [适配记录](WORKBUDDY_5_8_3.md) |
 | Intel Mac，macOS 26.5.1 | WorkBuddy 5.8.2，x86_64 | 七项核心实测、三项故障实测、本机及 Intel/Ubuntu 云端各 259 项回归、两种整 GUI 正常退出恢复通过 | v0.1.2；当前原生 MCP 待完全重启确认，本轮用量未知，见 [适配记录](WORKBUDDY_5_8_2.md) |
 | Intel Mac，macOS 26.5.1 | WorkBuddy 5.7.7，x86_64 内置运行时 | 三模型短任务、Step 1m 会话、Write/Bash 权限、拒绝、Deepseek 取消、两种整 GUI 退出恢复与清理通过 | v0.1.1，本机 257 项；原生 Codex 服务待完全重启确认，本轮用量未知，见 [适配记录](WORKBUDDY_5_7_7.md) |
 | Intel Mac，macOS 26.5.1 | WorkBuddy 5.6.2，x86_64 内置运行时 | 冷启动双模型、文件、Bash、权限、取消、故障，以及流式/权限等待时整个 GUI 退出/重开和自有资源清理通过 | v0.1.0 延续 alpha.3 执行逻辑；真实矩阵、本机及 Intel/Ubuntu 云端 232 项通过；原生已确认加载 0.1.0a3，用量核对七条 |

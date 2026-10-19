@@ -1,6 +1,6 @@
 # 安装与卸载
 
-项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前源码及本机安装对应 v0.1.3；WorkBuddy 5.8.3 已完成本机验收。正式 Release 尚待审核与发布。
+项目：`codex-workbuddy-bridge-intelmac`。本地安装的是 Codex 使用的 MCP 服务，无须额外打开桌面窗口。WorkBuddy 应保持已安装、主界面运行且已登录。当前源码及本机安装对应 v0.1.3；WorkBuddy 5.8.3 已完成本机验收。正式发布状态以仓库 Release 为准。
 
 ## 环境要求
 

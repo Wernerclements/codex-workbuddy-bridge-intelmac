@@ -2,7 +2,7 @@
 
 ## 2026-10-19 · v0.1.3 / WorkBuddy 5.8.3
 
-本机 229 项项目测试 + 34 项上游回归，共 263 项，无跳过；PR #19 的 [GitHub Actions run 39196045672](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196045672) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。三模型、精确 allow_once/reject_once、输出后取消、三项故障和两种整 GUI 退出/重开通过。七项 core 均完成严格同记录幂等性核对并清理确认。Step 1m 是会话预算与短任务，不代表百万 token 满载。安装器 dry-run、安装、pip check 与新进程 stdio health 均通过，source/install metadata 为 0.1.3；当前对话原生 health 仍报告 `bridge_version=0.1.2`；安装环境独立 stdio 已确认 0.1.3。发布后须完全重启 Codex，再只读确认原生 0.1.3。费用与 MCP 业务未核对，#5、#11 仍开放。旧版未降级重测；PR #19 CI 已在 Intel macOS 与 Ubuntu 通过；尚未合并或 Release。详见 [5.8.3 适配记录](WORKBUDDY_5_8_3.md)。
+本机 229 项项目测试 + 34 项上游回归，共 263 项，无跳过；PR #19 的 [GitHub Actions run 39196435274](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196435274) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。三模型、精确 allow_once/reject_once、输出后取消、三项故障和两种整 GUI 退出/重开通过。七项 core 均完成严格同记录幂等性核对并清理确认。Step 1m 是会话预算与短任务，不代表百万 token 满载。安装器 dry-run、安装、pip check 与新进程 stdio health 均通过，source/install metadata 为 0.1.3；当前对话原生 health 仍报告 `bridge_version=0.1.2`；安装环境独立 stdio 已确认 0.1.3。发布后须完全重启 Codex，再只读确认原生 0.1.3。费用与 MCP 业务未核对，#5、#11 仍开放。旧版未降级重测；PR #19 CI 已在 Intel macOS 与 Ubuntu 通过；正式发布状态以仓库 Release 为准。详见 [5.8.3 适配记录](WORKBUDDY_5_8_3.md)。
 
 错误认证的结论以独立自有 runtime、三个隔离 cookie jar 的无 prompt probe 为准：有效凭证前后认证成功；无效凭证请求以空 cookie jar 返回 `authEnabled=true`、`authenticated=false`，清理确认。最初共用 cookie jar 的失败报告在本机保留；任意泛型异常布尔不能单独证明凭证被拒绝。此为验证现有行为，本轮没有修改认证代码。
 
