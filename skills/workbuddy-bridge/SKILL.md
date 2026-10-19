@@ -26,7 +26,7 @@ description: Delegate a task from Codex to the existing WorkBuddy desktop applic
 
 任务进入终态后调用 `get_result(task_id)`。读取 `answer_path` 指向的正文，核对 `status`、`artifacts` 文件清单、`partial`、`scan_limited`、`cleanup_pending` 和 `cleanup_confirmed`。长文本从结果文件读取，不仅依赖状态摘要。`partial=true` 表示正文或文件只保留了部分执行结果，必须说明尚未确认完整完成；扫描受限时，说明文件清单可能不完整。
 
-`uncertain` 表示执行结果未确认，不要自动重发；使用原 task_id 查询或使用完全相同 request_id 与参数取回记录。清理未确认时报告实际标记，不把任务终态当作资源清理已完成。应用更新后当前适配仅允许 5.6.2、5.7.7、5.8.2，不尝试绕过版本检查；5.7.6 未完成验收。
+`uncertain` 表示执行结果未确认，不要自动重发；使用原 task_id 查询或使用完全相同 request_id 与参数取回记录。清理未确认时报告实际标记，不把任务终态当作资源清理已完成。应用更新后当前适配仅允许 5.6.2、5.7.7、5.8.2、5.8.3，不尝试绕过版本检查；5.7.6 未完成验收。
 
 核对实际产物和用户的完成标准。报告任务是成功、失败、取消还是结果不确定。保留任务 ID 和可点击的结果路径。模拟测试通过、健康检查通过或账号已认证，都不能作为真实任务完成的证据。
 
@@ -50,4 +50,6 @@ Kimi K3 的已验证模型 ID 为 `kimi-k3-1`，本轮仅确认模型选择与 M
 
 0.1.1 查询终态任务时会在后台刷新清理状态，首次仍可能 pending；稍后查询原 task_id。不会重放任务。WorkBuddy 5.7.7 重开后，启动等待账号模型目录就绪，保护握手有界等待；health 的就绪字段不等于任务完成。更新源码后须完全重启 Codex 并只读确认 bridge_version。
 
-0.1.2 / WorkBuddy 5.8.2：新原生保护模块与账号隔离认证按精确版本适配。应用自带 --prewarm CLI 不属于 GUI 或桥接自有进程，不接管或清理它。七项核心及三项故障实测通过；执行中及权限等待时整 GUI 退出恢复通过，正式状态见 Release。本轮费用未核对，独立服务通过不代替重启后原生 health 确认。
+0.1.2 / WorkBuddy 5.8.2：新原生保护模块与账号隔离认证按精确版本适配。应用自带 --prewarm CLI 不属于 GUI 或桥接自有进程，不接管或清理它。七项核心及三项故障实测通过；执行中及权限等待时整 GUI 退出恢复通过，正式状态见 Release。
+
+0.1.3 / WorkBuddy 5.8.3：新增版本专属保护导出映射；认证类型、协议入口哈希与 5.8.2 一致，协议6及 host、ready、凭证、缓存、模型就绪与 prewarm 边界复核无阻断。七项 core 的状态、严格同记录幂等与清理、三项故障和两轮整 GUI 退出/重开均通过；错误认证由无 prompt、独立 cookie jar 验证，未修改生产认证。Step 的 1m 是短任务的会话预算确认，不是百万 token 满载测试。本机 263 项（229 项项目 + 34 项上游）通过；PR #19 GitHub Actions 在 Intel macOS 与 Ubuntu 各通过 263 项；费用未核对，MCP 业务未复验，#5/#11 仍开放。独立 stdio health 为 0.1.3；当前对话原生 health 仍为 0.1.2。发布后须完全重启 Codex 并只读确认原生 0.1.3。详见项目 docs/WORKBUDDY_5_8_3.md。

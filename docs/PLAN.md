@@ -1,5 +1,13 @@
 # 移植计划
 
+## 2026-10-19 · v0.1.3 / WorkBuddy 5.8.3 当前进度
+
+5.8.3 版本适配、7 项 core、3 项故障、执行中与权限等待中两轮整 GUI 退出恢复均在本机通过；229 项项目测试 + 34 项上游回归通过；PR #19 的 [GitHub Actions run 39196435274](https://github.com/Wernerclements/codex-workbuddy-bridge-intelmac/actions/runs/39196435274) 在 Intel macOS 与 Ubuntu（Python 3.12）各通过 263 项。Step 1m 只确认会话预算与短任务回显，不是百万 token 满载。
+
+当前安装器 dry-run 与实际安装、pip check、安装环境独立 stdio health 已通过并核对版本 0.1.3；当前对话原生 health 仍报告 0.1.2；发布后须完全重启 Codex 并只读确认 0.1.3。#5 和 #11 继续开放，费用及 MCP 业务调用未核对，旧版未降级重测。适配与验收已完成，变更记录见 PR #19。正式发布状态以仓库 Release 为准。
+
+错误认证以独立自有 runtime 的隔离 cookie 无 prompt 验证为准；最初同一客户端的失败报告保留，不能用泛型异常布尔代替证据。认证代码未因此修改。细节见 [5.8.3 适配记录](WORKBUDDY_5_8_3.md) 与 [测试报告](TEST_REPORT.md)。
+
 ## 2026-10-15 · v0.1.2 / WorkBuddy 5.8.2
 
 新保护模块、账号隔离认证类型和预热进程识别已适配。三模型（Step 1m）、Write/Bash、拒绝、Deepseek 流式取消、错误本机认证、worker 失联、MCP 强制中断恢复通过；清理确认。本机及 Intel macOS / Ubuntu 云端各完成 225 项项目测试 + 34 项上游回归，无跳过。2026-10-15 执行中及权限等待时整 GUI 正常退出/重开、新任务恢复和清理均通过，发布状态以 Release 为准；详情见 [5.8.2 适配记录](WORKBUDDY_5_8_2.md)。

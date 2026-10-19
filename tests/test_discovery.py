@@ -117,14 +117,16 @@ class DiscoveryTests(unittest.TestCase):
                 discovery.check_endpoint(endpoint)
 
     def test_unknown_version_cannot_enter_write_discovery(self):
-        with patch.object(discovery, "app_info", return_value={"version": "99.0.0", "intel_binary": True}), \
-                patch.object(discovery, "find_sockets") as sockets:
-            with self.assertRaises(discovery.WorkBuddyError):
+        for version in ("5.7.6", "5.8.1", "5.8.4", "99.0.0"):
+            with self.subTest(version=version), \
+                    patch.object(discovery, "app_info", return_value={"version": version, "intel_binary": True}), \
+                    patch.object(discovery, "find_sockets") as sockets, \
+                    self.assertRaises(discovery.WorkBuddyError):
                 discovery.discover(for_write=True)
             sockets.assert_not_called()
 
     def test_arm_only_binary_cannot_enter_write_discovery(self):
-        with patch.object(discovery, "app_info", return_value={"version": "5.6.2", "intel_binary": False}), \
+        with patch.object(discovery, "app_info", return_value={"version": "5.8.3", "intel_binary": False}), \
                 patch.object(discovery, "find_sockets") as sockets:
             with self.assertRaises(discovery.WorkBuddyError):
                 discovery.discover(for_write=True)
@@ -160,7 +162,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC-PRIVATE", str(caught.exception))
 
     def test_known_idle_sidecar_without_host_allows_cold_start(self):
-        for version in ("5.6.2", "5.7.7", "5.8.2"):
+        for version in ("5.6.2", "5.7.7", "5.8.2", "5.8.3"):
             with self.subTest(version=version), \
                     patch.object(discovery, "app_info", return_value={"version": version, "intel_binary": True}), \
                     patch.object(discovery, "find_sockets", return_value=[(self.path, 123)]), \

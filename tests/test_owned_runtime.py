@@ -81,12 +81,14 @@ class IdentityTests(unittest.TestCase):
                  f"{os.getuid()} 103 {executable} {owned.LAUNCHER} {TASK}",
                  f"{os.getuid()} 105 {executable} --optimize-for-size --max-semi-space-size=16 /synthetic/cli/bin/codebuddy --prewarm --prewarm-id=synthetic",
                  f"{os.getuid()+1} 104 {executable}"]
-        with patch.object(owned, "app_info", return_value={"version": "5.6.2",
-                "intel_binary": True, "executable": executable}), \
-                patch.object(owned.subprocess, "run", return_value=SimpleNamespace(stdout="\n".join(lines))), \
-                patch.object(owned, "process_identity", return_value=identity()) as inspect:
-            self.assertEqual(owned.gui_identity(), {"pid": 100, "start": START, "version": "5.6.2"})
-        inspect.assert_called_once_with(100)
+        for version in ("5.6.2", "5.8.3"):
+            with self.subTest(version=version), \
+                    patch.object(owned, "app_info", return_value={"version": version,
+                        "intel_binary": True, "executable": executable}), \
+                    patch.object(owned.subprocess, "run", return_value=SimpleNamespace(stdout="\n".join(lines))), \
+                    patch.object(owned, "process_identity", return_value=identity()) as inspect:
+                self.assertEqual(owned.gui_identity(), {"pid": 100, "start": START, "version": version})
+            inspect.assert_called_once_with(100)
 
     def test_multiple_gui_instances_refuse_cold_launch(self):
         executable = owned.APP / "Contents/MacOS/Electron"
@@ -122,7 +124,7 @@ class IdentityTests(unittest.TestCase):
         self.assertNotIn("CODEBUDDY_DISABLE_PRODUCT_CACHE", env)
 
     def test_new_version_environment_is_exact_and_unknown_version_refuses(self):
-        for version in ("5.7.7", "5.8.2"):
+        for version in ("5.7.7", "5.8.2", "5.8.3"):
             with self.subTest(version=version):
                 env = owned.launch_environment("synthetic-local-password", version=version)
                 self.assertEqual(env["CODEBUDDY_DISABLE_PRODUCT_CACHE"], "1")
